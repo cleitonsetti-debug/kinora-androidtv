@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Kinora" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/kinora_bg</item>
+        <item name="android:colorBackground">@color/kinora_bg</item>
+        <item name="android:statusBarColor">@color/kinora_bg</item>
+        <item name="android:navigationBarColor">@color/kinora_bg</item>
+    </style>
+</resources>
