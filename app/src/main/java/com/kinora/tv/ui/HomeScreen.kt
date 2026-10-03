@@ -163,9 +163,15 @@ class HomeModel {
             navJob = app.scope.launch {
                 delay(400)
                 val key = menuKeys[idx]
-                if (key != category) loadCategory(app, key)
+                if (focusArea == "nav" && navIdx == idx && key != category) loadCategory(app, key)
             }
         }
+    }
+
+    /** Foco saiu da barra (filtros/linhas): cancela a troca de aba pendente. */
+    fun cancelNavJob() {
+        navJob?.cancel()
+        navJob = null
     }
 
     fun onNavSelected(app: AppState, idx: Int) {
@@ -283,6 +289,7 @@ class HomeModel {
                 if (g == st.genre) current = values.size - 1
             }
         }
+        cancelNavJob()
         picker = PickerState(mode, title, labels, values, current)
     }
 
@@ -296,14 +303,26 @@ class HomeModel {
         } else {
             st.genre = p.values[idx] as String
         }
+        focusChipNow()
         picker = null
         loadCategory(app, category)
         closePickerFocus()
     }
 
     fun closePicker() {
+        focusChipNow()
         picker = null
         closePickerFocus()
+    }
+
+    private fun focusChipNow() {
+        if (chips.isEmpty()) return
+        focusArea = "filters"
+        cancelNavJob()
+        try {
+            chipReq[chipIdx.coerceIn(0, chips.size - 1)].requestFocus()
+        } catch (e: Exception) {
+        }
     }
 
     private fun closePickerFocus() {
@@ -552,6 +571,7 @@ fun HomeScreen(app: AppState, m: HomeModel) {
                         onFocus = {
                             m.focusArea = "filters"
                             m.chipIdx = i
+                            m.cancelNavJob()
                         },
                         onClick = { m.openPicker(app, if (i == 0) "cat" else "genre") },
                     )
@@ -629,6 +649,7 @@ private fun HomeRowView(app: AppState, m: HomeModel, row: RowDef, rowIndex: Int,
                 onFocus = {
                     row.focusedIdx = idx
                     m.focusArea = "rows"
+                    m.cancelNavJob()
                     if (m.curRow != rowIndex) m.curRow = rowIndex
                     m.pendingHero = info
                 },

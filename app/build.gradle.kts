@@ -12,16 +12,28 @@ android {
         applicationId = "com.kinora.tv"
         minSdk = 21
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.2.1-tv"
+        versionCode = 2
+        versionName = "1.2.2-tv"
+    }
+
+    // Chave fixa do projeto (so para instalar na TV por fora da loja): assim cada APK novo
+    // instala por cima do anterior sem precisar desinstalar.
+    signingConfigs {
+        create("kinora") {
+            storeFile = file("kinora.jks")
+            storePassword = "kinora123"
+            keyAlias = "kinora"
+            keyPassword = "kinora123"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Assinado com a chave de debug para poder instalar direto na TV (sideload).
-            // Para publicar na Play Store, troque por uma chave propria.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("kinora")
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("kinora")
         }
     }
 

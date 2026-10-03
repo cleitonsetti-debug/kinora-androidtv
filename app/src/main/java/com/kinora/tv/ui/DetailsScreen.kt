@@ -319,6 +319,15 @@ class DetailsModel(initial: Info) {
 
     fun closePanel() {
         streamJob?.cancel()
+        // devolve o foco antes de esconder o painel (senao ele "cai" no primeiro item da tela)
+        try {
+            when {
+                mode == "single" -> watchReq.requestFocus()
+                mode == "episodes" && lastList == "episodes" -> episodeReq.requestFocus()
+                mode == "episodes" -> seasonReq.requestFocus()
+            }
+        } catch (e: Exception) {
+        }
         panelOpen = false
         applyFocus()
     }
