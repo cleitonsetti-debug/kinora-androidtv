@@ -36,12 +36,22 @@ fun SettingsScreen(app: AppState, screen: Screen.SettingsScreen) {
     LaunchedEffect(app.focusTick) { req.focusSoon() }
 
     fun yesNo(v: Boolean) = if (v) t("yes") else t("no")
+    fun subLangLabel(v: String) = if (v == "off") t("opt_off") else t("lang_opt_$v")
+    fun audioLangLabel(v: String) = if (v == "auto") t("opt_auto") else t("lang_opt_$v")
+    fun nextOption(cur: String, options: List<String>): String {
+        val i = options.indexOf(cur)
+        return if (i < 0) options[0] else options[(i + 1) % options.size]
+    }
 
     val st = app.settings
     val lines = listOf(
         t("set_language") + ":   " + t("lang_name"),
         t("set_resume") + ":   " + yesNo(st.resume),
         t("set_autopick") + ":   " + yesNo(st.autoPick),
+        t("set_sublang") + ":   " + subLangLabel(st.subLang),
+        t("set_audiolang") + ":   " + audioLangLabel(st.audioLang),
+        t("set_autonext") + ":   " + yesNo(st.autoNext),
+        t("set_intro") + ":   " + yesNo(st.intro),
         t("set_clear_history"),
         t("set_reset_addons"),
         t("set_about"),
@@ -56,17 +66,21 @@ fun SettingsScreen(app: AppState, screen: Screen.SettingsScreen) {
             }
             1 -> app.updateSettings(st.copy(resume = !st.resume))
             2 -> app.updateSettings(st.copy(autoPick = !st.autoPick))
-            3 -> app.confirm(t("settings_title"), t("confirm_clear_history")) {
+            3 -> app.updateSettings(st.copy(subLang = nextOption(st.subLang, listOf("off", "pt", "en", "es"))))
+            4 -> app.updateSettings(st.copy(audioLang = nextOption(st.audioLang, listOf("auto", "pt", "en", "es"))))
+            5 -> app.updateSettings(st.copy(autoNext = !st.autoNext))
+            6 -> app.updateSettings(st.copy(intro = !st.intro))
+            7 -> app.confirm(t("settings_title"), t("confirm_clear_history")) {
                 app.store.clearHistory()
                 app.bumpHistory()
                 app.showMessage(t("settings_title"), t("history_cleared"))
             }
-            4 -> app.confirm(t("settings_title"), t("confirm_reset_addons")) {
+            8 -> app.confirm(t("settings_title"), t("confirm_reset_addons")) {
                 app.store.saveAddonConfig(Store.defaultAddonConfig())
                 app.loadAddons()
                 app.showMessage(t("settings_title"), t("addons_reset"))
             }
-            5 -> app.showMessage(t("about_title"), t("about_body") + "  [" + BuildConfig.VERSION_NAME + "]")
+            9 -> app.showMessage(t("about_title"), t("about_body") + "  [" + BuildConfig.VERSION_NAME + "]")
         }
     }
 
@@ -75,7 +89,7 @@ fun SettingsScreen(app: AppState, screen: Screen.SettingsScreen) {
         KLabel(t("settings_hint"), 100, 140, 1700, 40, 22, color = K.Hint)
 
         LazyColumn(
-            modifier = Modifier.at(100, 220).box(1700, 560),
+            modifier = Modifier.at(100, 220).box(1700, 700),
             contentPadding = PaddingValues(vertical = d(4)),
         ) {
             itemsIndexed(lines) { idx, line ->

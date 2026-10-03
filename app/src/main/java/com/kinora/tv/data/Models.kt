@@ -17,6 +17,7 @@ data class Info(
     val rating: String = "",
     val genres: String = "",
     val addon: String = "",
+    val cert: String = "",
     val videoId: String = "",
     val season: Int = 0,
     val episode: Int = 0,
@@ -36,6 +37,7 @@ data class Info(
         put("rating", rating)
         put("genres", genres)
         put("addon", addon)
+        put("cert", cert)
         put("season", season)
         put("episode", episode)
         put("position", position)
@@ -55,6 +57,7 @@ data class Info(
             rating = o.str("rating"),
             genres = o.str("genres"),
             addon = o.str("addon"),
+            cert = o.str("cert"),
             videoId = o.str("videoId"),
             season = o.int("season"),
             episode = o.int("episode"),
@@ -92,12 +95,24 @@ data class Episode(
     val overview: String,
 )
 
+/** Legenda externa (do stream ou de um addon "subtitles"). */
+data class SubTrack(val url: String, val lang: String, val label: String)
+
 data class StreamOption(
     val url: String,
     val title: String,
     val headers: Map<String, String> = emptyMap(),
     val demo: Boolean = false,
+    val addonName: String = "",
+    val addonUrl: String = "",
+    val subs: List<SubTrack> = emptyList(),
 )
+
+/** Episodio na lista de reproducao (ordem temporada/episodio, sem especiais). */
+data class PlaylistItem(val id: String, val season: Int, val episode: Int, val title: String)
+
+/** Fonte em uso no player (addon + rotulo). */
+data class SourceInfo(val addonName: String, val addonUrl: String, val label: String)
 
 /** Pedido de reproducao enviado da tela de detalhes para o player. */
 data class PlayRequest(
@@ -109,5 +124,8 @@ data class PlayRequest(
     val info: Info,
     val season: Int,
     val episode: Int,
-    val nextEp: Episode?,
+    val nextEp: PlaylistItem?,
+    val playlist: List<PlaylistItem> = emptyList(),
+    val source: SourceInfo? = null,
+    val subs: List<SubTrack> = emptyList(),
 )

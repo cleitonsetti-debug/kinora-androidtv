@@ -7,6 +7,22 @@ busca com teclado próprio, filtros de catálogo/gênero, gerenciador de addons 
 
 Catálogo via **addons no protocolo Stremio** (padrão: Cinemeta), igual ao app Roku.
 
+## Novidades da v1.3 (iguais ao Kinora v1.3 do Roku)
+
+- **Player próprio:** Baixo (ou Cima/Menu) mostra os controles com ícones: -10 s, pausar/continuar, +10 s, ir para,
+  legendas, áudio, próximo episódio e detalhes da fonte. Com os controles escondidos, OK pausa e Esquerda/Direita
+  abrem a barra de tempo.
+- **Barra de tempo:** Esquerda/Direita movem o ponto com passos que aceleram (10 a 120 s); OK confirma, Voltar cancela
+  e, parado por 3 s, confirma sozinho.
+- **Ficha ao iniciar:** título, nota do IMDb, classificação indicativa (quando o addon fornece), ano e gêneros por 7 s.
+- **Legendas e áudio:** legendas do stream e de addons com o recurso `subtitles`, escolha de faixa de áudio e
+  idiomas preferidos em Ajustes.
+- **Próximo episódio:** cartão com contagem perto do fim e reprodução automática, preferindo a mesma fonte.
+- **Destaques na tela inicial:** o banner gira sozinho (com fade) entre títulos em destaque, com botão **Detalhes**;
+  a tecla Play abre o destaque. Linhas extras de filmes por gênero.
+- **Addons:** painel com versão, descrição, tipos, recursos, catálogos e endereço do addon.
+- **Sinopse:** buscada no addon quando falta no catálogo ("Sinopse indisponível." se o addon não tiver).
+
 ## Como gerar o APK
 
 ### Opção 1: GitHub Actions (sem instalar nada)

@@ -76,3 +76,44 @@ fun guessStreamFormat(url: String): String {
         else -> ""
     }
 }
+
+// ---------------------------------------------------------------------------
+// Idiomas de faixas (legenda/audio): pref = "pt" | "en" | "es"
+// ---------------------------------------------------------------------------
+fun langMatches(code: String, pref: String): Boolean {
+    val c = code.lowercase()
+    if (c.isEmpty()) return false
+    return when (pref) {
+        "pt" -> c == "pt" || c.startsWith("pt-") || c.startsWith("pt_") || c == "por" || c == "pob" || c == "pb"
+        "en" -> c == "en" || c.startsWith("en-") || c.startsWith("en_") || c == "eng"
+        "es" -> c == "es" || c.startsWith("es-") || c.startsWith("es_") || c == "spa" || c == "esl" || c == "lat"
+        else -> false
+    }
+}
+
+/** Codigo de 2 letras para o player (Media3 usa codigos BCP-47). */
+fun toLang2(code: String): String = when {
+    langMatches(code, "pt") -> "pt"
+    langMatches(code, "en") -> "en"
+    langMatches(code, "es") -> "es"
+    else -> code.lowercase().ifEmpty { "und" }
+}
+
+fun langName(code: String): String = when {
+    langMatches(code, "pt") -> "Português"
+    langMatches(code, "en") -> "English"
+    langMatches(code, "es") -> "Español"
+    code.isEmpty() -> "?"
+    else -> code.uppercase()
+}
+
+private fun pad2(n: Int): String = if (n < 10) "0$n" else n.toString()
+
+/** 3725 -> "1:02:05" ; 125 -> "2:05" */
+fun formatTime(totalSec: Int): String {
+    val t = if (totalSec < 0) 0 else totalSec
+    val h = t / 3600
+    val mi = (t % 3600) / 60
+    val sc = t % 60
+    return if (h > 0) "$h:${pad2(mi)}:${pad2(sc)}" else "$mi:${pad2(sc)}"
+}

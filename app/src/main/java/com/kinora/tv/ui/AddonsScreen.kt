@@ -21,6 +21,9 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import com.kinora.tv.data.Addon
+import com.kinora.tv.data.AddonStore
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import com.kinora.tv.data.Net
 import com.kinora.tv.data.normalizeAddonUrl
 import kotlinx.coroutines.launch
@@ -36,7 +39,7 @@ private fun addonLine(app: AppState, a: Addon): String {
         !a.enabled -> t("state_off")
         else -> t("state_on")
     }
-    return "[" + st + "]  " + a.name + "     " + a.url
+    return "[" + st + "]  " + a.name
 }
 
 @Composable
@@ -114,13 +117,13 @@ fun AddonsScreen(app: AppState, screen: Screen.Addons) {
         val lines = listOf(t("addons_add")) + app.addons.map { addonLine(app, it) }
         LazyColumn(
             state = listState,
-            modifier = Modifier.at(100, 220).box(1700, 700),
+            modifier = Modifier.at(100, 220).box(1000, 700),
             contentPadding = PaddingValues(vertical = d(4)),
         ) {
             itemsIndexed(lines) { idx, line ->
                 ListPill(
                     text = line,
-                    w = 1700,
+                    w = 1000,
                     h = 64,
                     textOffset = 28,
                     size = 24,
@@ -147,6 +150,11 @@ fun AddonsScreen(app: AppState, screen: Screen.Addons) {
                 )
             }
         }
+
+        // Detalhes do addon em foco (versao, descricao, tipos, recursos, catalogos, endereco)
+        Box(Modifier.at(1150, 220).box(700, 640).clip(RoundedCornerShape(d(16))).background(K.Panel))
+        val detail = app.addons.getOrNull(focused - 1)?.let { AddonStore.addonDetailsText(it, t) } ?: t("ad_help")
+        KLabel(detail, 1180, 244, 640, 592, 21, color = K.TextList, maxLines = 18)
 
         KLabel(hint, 100, 940, 1700, 40, 24, weight = W.Medium, color = K.Meta)
     }

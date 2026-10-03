@@ -160,4 +160,41 @@ object AddonStore {
         }
         return out
     }
+
+    fun findAddon(addons: List<Addon>, url: String): Addon? = addons.firstOrNull { it.url == url }
+
+    /** Texto de detalhes de um addon (varias linhas). */
+    fun addonDetailsText(a: Addon, t: Strings): String {
+        val lines = ArrayList<String>()
+        val st = when {
+            !a.ok -> t("state_err")
+            !a.enabled -> t("state_off")
+            else -> t("state_on")
+        }
+        lines.add("${a.name}  [$st]")
+        val mf = a.manifest
+        if (a.ok && mf != null) {
+            val v = mf.str("version")
+            if (v.isNotEmpty()) lines.add(t("ad_version") + ": " + v)
+            var d = mf.str("description")
+            if (d.isEmpty()) d = t("ad_nodesc")
+            if (d.length > 220) d = d.take(217) + "..."
+            lines.add(d)
+            val types = joinList(mf.opt("types"), 8)
+            if (types.isNotEmpty()) lines.add(t("ad_types") + ": " + types)
+            val names = ArrayList<String>()
+            val res = mf.optJSONArray("resources")
+            if (res != null) {
+                for (i in 0 until res.length()) {
+                    val r = res.opt(i)
+                    if (r is JSONObject) names.add(r.str("name")) else names.add(asStr(r))
+                }
+            }
+            if (names.isNotEmpty()) lines.add(t("ad_resources") + ": " + names.joinToString(", "))
+            val cats = mf.optJSONArray("catalogs")
+            if (cats != null) lines.add(t("ad_catalogs") + ": " + cats.length())
+        }
+        lines.add(t("ad_url") + ": " + a.url)
+        return lines.joinToString("\n")
+    }
 }

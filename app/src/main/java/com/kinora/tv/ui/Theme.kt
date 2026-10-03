@@ -145,9 +145,21 @@ fun KLabel(
     align: TextAlign = TextAlign.Start,
 ) {
     val boxAlign = when (vAlign) {
-        Alignment.Bottom -> if (align == TextAlign.Center) Alignment.BottomCenter else Alignment.BottomStart
-        Alignment.CenterVertically -> if (align == TextAlign.Center) Alignment.Center else Alignment.CenterStart
-        else -> if (align == TextAlign.Center) Alignment.TopCenter else Alignment.TopStart
+        Alignment.Bottom -> when (align) {
+            TextAlign.Center -> Alignment.BottomCenter
+            TextAlign.End -> Alignment.BottomEnd
+            else -> Alignment.BottomStart
+        }
+        Alignment.CenterVertically -> when (align) {
+            TextAlign.Center -> Alignment.Center
+            TextAlign.End -> Alignment.CenterEnd
+            else -> Alignment.CenterStart
+        }
+        else -> when (align) {
+            TextAlign.Center -> Alignment.TopCenter
+            TextAlign.End -> Alignment.TopEnd
+            else -> Alignment.TopStart
+        }
     }
     Box(Modifier.at(x, y).width(d(w)).height(d(h)), contentAlignment = boxAlign) {
         KText(text, size, weight = weight, color = color, maxLines = maxLines, align = align)

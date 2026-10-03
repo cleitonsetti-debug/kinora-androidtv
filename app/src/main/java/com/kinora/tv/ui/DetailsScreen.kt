@@ -32,6 +32,9 @@ import com.kinora.tv.data.Episode
 import com.kinora.tv.data.Info
 import com.kinora.tv.data.Net
 import com.kinora.tv.data.PlayRequest
+import com.kinora.tv.data.PlaylistItem
+import com.kinora.tv.data.SourceInfo
+import com.kinora.tv.data.Streams
 import com.kinora.tv.data.StreamOption
 import com.kinora.tv.data.guessStreamFormat
 import com.kinora.tv.data.int
@@ -91,7 +94,12 @@ class DetailsModel(initial: Info) {
         if (started) return
         started = true
         val it = info
-        if (it.kind == "movie") showSingle() else loadMeta(app)
+        if (it.kind == "movie") {
+            showSingle()
+            loadMeta(app)
+        } else {
+            loadMeta(app)
+        }
 
         // Veio de "Continuar assistindo": ja abre a escolha da fonte do episodio
         if (it.videoId.isNotEmpty()) {
@@ -109,6 +117,7 @@ class DetailsModel(initial: Info) {
         val base = AddonStore.findMetaBase(app.addons, info.kind, info.id, info.addon)
         if (base.isEmpty()) {
             showSingle()
+            if (info.description.isEmpty()) desc = app.t("no_synopsis")
             return
         }
         val url = base + "/meta/" + urlEncode(info.kind) + "/" + urlEncode(info.id) + ".json"
@@ -120,12 +129,24 @@ class DetailsModel(initial: Info) {
                 updateFromMeta(meta)
                 parseEpisodes(meta)
             }
-            if (episodes.isNotEmpty()) showEpisodes() else showSingle()
+            if (episodes.isNotEmpty() && info.kind != "movie") showEpisodes() else if (mode != "single") showSingle()
+            if (info.description.isEmpty()) desc = app.t("no_synopsis")
         }
+    }
+
+    /** Classificacao indicativa, quando o addon a fornece (o Cinemeta nao traz). */
+    private fun metaCertification(meta: JSONObject): String {
+        for (k in listOf("certification", "contentRating", "ageRating", "rated", "mpaa", "classification")) {
+            val v = meta.str(k)
+            if (v.isNotEmpty()) return v
+        }
+        return ""
     }
 
     private fun updateFromMeta(meta: JSONObject) {
         var i = info
+        val cert = metaCertification(meta)
+        if (cert.isNotEmpty()) i = i.copy(cert = cert)
         val d = meta.str("description")
         if (d.isNotEmpty()) {
             i = i.copy(description = d)
@@ -164,16 +185,17 @@ class DetailsModel(initial: Info) {
         episodes = list
     }
 
-    /** Proximo episodio (ordem temporada/episodio, ignorando especiais). */
-    private fun findNextEpisode(videoId: String): Episode? {
-        if (episodes.isEmpty()) return null
-        val ordered = episodes.sortedBy { it.season * 100000 + it.episode }
+    /** Episodios em ordem temporada/episodio, sem especiais (lista de reproducao do player). */
+    private fun orderedEpisodes(): List<PlaylistItem> =
+        episodes.filter { it.season > 0 }
+            .sortedBy { it.season * 100000 + it.episode }
+            .map { PlaylistItem(it.id, it.season, it.episode, it.title) }
+
+    private fun findNextEpisode(videoId: String): PlaylistItem? {
+        val ordered = orderedEpisodes()
         val found = ordered.indexOfFirst { it.id == videoId }
         if (found < 0) return null
-        for (j in found + 1 until ordered.size) {
-            if (ordered[j].season > 0) return ordered[j]
-        }
-        return null
+        return ordered.getOrNull(found + 1)
     }
 
     // ---------------------------------------------------------------------------
@@ -223,14 +245,6 @@ class DetailsModel(initial: Info) {
     // ---------------------------------------------------------------------------
     // Fontes de video (addons com o recurso "stream")
     // ---------------------------------------------------------------------------
-    private fun streamHeaders(s: JSONObject): Map<String, String> {
-        val rq = s.optJSONObject("behaviorHints")?.optJSONObject("proxyHeaders")?.optJSONObject("request")
-            ?: return emptyMap()
-        val out = LinkedHashMap<String, String>()
-        for (k in rq.keys()) out[k] = rq.str(k)
-        return out
-    }
-
     private fun startStreams(app: AppState, videoId: String, epLabel: String, season: Int, episode: Int) {
         val t = app.t
         pendingPlay = PendingPlay(videoId, epLabel, season, episode)
@@ -241,43 +255,17 @@ class DetailsModel(initial: Info) {
         panelTitle = t("panel_searching")
 
         val kind = info.kind
-        val sources = app.addons.filter { AddonStore.supportsResource(it, "stream", kind, videoId) }
-
         streamJob = app.scope.launch {
-            val results = sources.map { a ->
-                async {
-                    Pair(a.name, Net.getJson(a.url + "/stream/" + urlEncode(kind) + "/" + urlEncode(videoId) + ".json"))
-                }
-            }.awaitAll()
-
-            val found = ArrayList<StreamOption>()
-            var unsupported = 0
-            for ((addonName, res) in results) {
-                if (!res.ok) continue
-                for (s in res.data?.optJSONArray("streams").objects()) {
-                    val url = s.str("url")
-                    if (url.isNotEmpty() && url.lowercase().startsWith("http")) {
-                        val nm = s.str("name").replace("\n", " ")
-                        var tt = s.str("title")
-                        if (tt.isEmpty()) tt = s.str("description")
-                        tt = tt.replace("\n", " | ")
-                        var label = "[$addonName] "
-                        if (nm.isNotEmpty()) label += "$nm  "
-                        label += tt
-                        if (label.length > 120) label = label.take(117) + "..."
-                        found.add(StreamOption(url, label, streamHeaders(s)))
-                    } else {
-                        unsupported++
-                    }
-                }
-            }
+            val res = Streams.fetch(app.addons, kind, videoId)
+            val found = ArrayList(res.found)
+            val unsupported = res.unsupported
 
             val realCount = found.size
             // Video de teste sempre no fim da lista, para validar o player
             found.add(
                 StreamOption(
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                    t("demo_title"), emptyMap(), demo = true,
+                    Streams.DEMO_URL, t("demo_title"), emptyMap(), demo = true,
+                    addonName = t("demo_addon"), addonUrl = "",
                 )
             )
             streams = found
@@ -313,6 +301,9 @@ class DetailsModel(initial: Info) {
                 season = pp.season,
                 episode = pp.episode,
                 nextEp = findNextEpisode(pp.videoId),
+                playlist = orderedEpisodes(),
+                source = SourceInfo(s.addonName, s.addonUrl, s.title),
+                subs = s.subs,
             )
         )
     }

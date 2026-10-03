@@ -7,7 +7,15 @@ import org.json.JSONObject
 
 data class AddonConfig(val url: String, val enabled: Boolean)
 
-data class Settings(val lang: String = "pt", val resume: Boolean = true, val autoPick: Boolean = false)
+data class Settings(
+    val lang: String = "pt",
+    val resume: Boolean = true,
+    val autoPick: Boolean = false,
+    val subLang: String = "off",      // off | pt | en | es
+    val audioLang: String = "auto",   // auto | pt | en | es
+    val autoNext: Boolean = true,
+    val intro: Boolean = true,
+)
 
 /** Persistencia local (equivale ao registry do Roku): addons, ajustes e historico. */
 class Store(context: Context) {
@@ -38,7 +46,12 @@ class Store(context: Context) {
         return try {
             val o = JSONObject(raw)
             val lang = o.str("lang").takeIf { it in I18n.codes } ?: "pt"
-            Settings(lang, o.optBoolean("resume", true), o.optBoolean("autoPick", false))
+            val sl = o.str("subLang").takeIf { it in listOf("off", "pt", "en", "es") } ?: "off"
+            val al = o.str("audioLang").takeIf { it in listOf("auto", "pt", "en", "es") } ?: "auto"
+            Settings(
+                lang, o.optBoolean("resume", true), o.optBoolean("autoPick", false),
+                sl, al, o.optBoolean("autoNext", true), o.optBoolean("intro", true),
+            )
         } catch (e: Exception) {
             Settings()
         }
@@ -46,6 +59,8 @@ class Store(context: Context) {
 
     fun saveSettings(s: Settings) {
         val o = JSONObject().put("lang", s.lang).put("resume", s.resume).put("autoPick", s.autoPick)
+            .put("subLang", s.subLang).put("audioLang", s.audioLang)
+            .put("autoNext", s.autoNext).put("intro", s.intro)
         prefs.edit().putString("settings", o.toString()).apply()
     }
 
