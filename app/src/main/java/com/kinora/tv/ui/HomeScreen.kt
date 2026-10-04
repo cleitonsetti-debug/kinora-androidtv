@@ -57,6 +57,14 @@ import com.kinora.tv.data.Net
 import com.kinora.tv.data.Strings
 import com.kinora.tv.data.objects
 import com.kinora.tv.data.urlEncode
+import com.kinora.tv.data.accentFor
+import com.kinora.tv.data.filterAdultGenres
+import com.kinora.tv.data.isAdultMeta
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -101,7 +109,7 @@ fun metaLine(t: Strings, info: Info, withEpisode: Boolean): String {
 }
 
 class HomeModel {
-    val menuKeys = listOf("home", "movies", "series", "search", "addons", "settings")
+    val menuKeys = listOf("home", "movies", "series", "search", "addons", "settings", "profiles")
 
     var category by mutableStateOf("home")
     var rows by mutableStateOf<List<RowDef>>(emptyList())
@@ -117,7 +125,17 @@ class HomeModel {
     var featured by mutableStateOf<List<Info>>(emptyList())
     var fIdx by mutableIntStateOf(0)
     val heroReq = FocusRequester()
-    private val metaCache = HashMap<String, String>()
+    val heroReq2 = FocusRequester()
+    var heroIdx by mutableIntStateOf(0)
+    /** a imagem de fundo do titulo em foco falta (historico/lista): buscar no meta */
+    private var heroBgNeeded = false
+    var heroBg by mutableStateOf("")
+    /** muda a cada titulo novo no banner (reinicia o zoom lento) */
+    var heroSeq by mutableIntStateOf(0)
+    var hideAdult = true
+    /** catalogos guardados em memoria por 5 minutos */
+    private val cache = HashMap<String, Pair<Long, List<org.json.JSONObject>>>()
+    private val metaCache = HashMap<String, Pair<String, String>>()
     private val metaPending = HashSet<String>()
     var focusArea by mutableStateOf("nav")
     var navIdx by mutableIntStateOf(0)
@@ -132,10 +150,12 @@ class HomeModel {
     var loadedRev = -1
     var loadedHist = -1
     var loadedLang = ""
+    var loadedFav = -1
+    var loadedProfile = ""
     private var loadJob: Job? = null
     private var navJob: Job? = null
 
-    val navReq = List(6) { FocusRequester() }
+    val navReq = List(7) { FocusRequester() }
     val chipReq = List(2) { FocusRequester() }
 
     var focusCmd by mutableIntStateOf(0)
@@ -155,7 +175,9 @@ class HomeModel {
     fun isStale(app: AppState): Boolean {
         if (app.addonsRev != loadedRev) return true
         if (category == "home" && app.historyRev != loadedHist) return true
+        if (category == "home" && app.favRev != loadedFav) return true
         if (app.settings.lang != loadedLang) return true
+        if (app.profile.id != loadedProfile) return true
         return false
     }
 
@@ -172,6 +194,7 @@ class HomeModel {
     fun focusHero(app: AppState) {
         if (featured.isEmpty()) return
         focusArea = "hero"
+        heroIdx = 0
         cancelNavJob()
         requestFocus("hero")
         onTopFocus(app)
@@ -196,16 +219,41 @@ class HomeModel {
         heroAnimate = animate
         if (hero === info) return
         hero = info
+        heroSeq += 1
         heroDesc = info.description
+        heroBgNeeded = info.background.isEmpty()
+        heroBg = info.background.ifEmpty { info.poster }
+        if (heroIdx == 1 && !heroPlayable()) heroIdx = 0
         // Sinopse ausente (ou cortada, no caso do historico): busca o meta completo
-        if (info.description.isEmpty() || info.videoId.isNotEmpty()) requestHeroMeta(app, info)
+        if (info.description.isEmpty() || info.videoId.isNotEmpty() || heroBgNeeded) requestHeroMeta(app, info)
+    }
+
+    /** "Assistir/Continuar" aparece para filmes e para o que estava sendo assistido. */
+    fun heroPlayable(): Boolean {
+        val h = hero ?: return false
+        return h.videoId.isNotEmpty() || h.kind == "movie"
+    }
+
+    /** Copia do destaque para "Assistir/Continuar": abre a ficha e ja procura a fonte. */
+    fun heroPlayInfo(): Info? {
+        val info = featured.getOrNull(fIdx) ?: return null
+        return if (info.videoId.isEmpty()) info.copy(videoId = info.id, season = 0, episode = 0) else info
+    }
+
+    private fun applyHeroMeta(app: AppState, desc: String, bg: String) {
+        heroDesc = desc.ifEmpty { app.t("no_synopsis") }
+        if (heroBgNeeded && bg.isNotEmpty()) {
+            heroBgNeeded = false
+            heroAnimate = true
+            heroBg = bg
+        }
     }
 
     private fun requestHeroMeta(app: AppState, info: Info) {
         val id = info.id
         if (id.isEmpty()) return
         metaCache[id]?.let {
-            heroDesc = it.ifEmpty { app.t("no_synopsis") }
+            applyHeroMeta(app, it.first, it.second)
             return
         }
         if (id in metaPending) return
@@ -215,14 +263,17 @@ class HomeModel {
         app.scope.launch {
             val res = Net.getJson(base + "/meta/" + urlEncode(info.kind) + "/" + urlEncode(id) + ".json")
             metaPending.remove(id)
-            val d = if (res.ok) res.data?.optJSONObject("meta")?.str("description") ?: "" else ""
-            metaCache[id] = d
-            if (hero?.id == id) heroDesc = d.ifEmpty { app.t("no_synopsis") }
+            val meta = if (res.ok) res.data?.optJSONObject("meta") else null
+            val d = meta?.str("description") ?: ""
+            val bg = meta?.str("background") ?: ""
+            metaCache[id] = Pair(d, bg)
+            if (hero?.id == id) applyHeroMeta(app, d, bg)
         }
     }
 
     /** Avanca o carrossel (a cada 8 s, so com o foco fora das linhas). */
     fun nextFeatured(app: AppState) {
+        if (!app.settings.carousel) return
         if (focusArea == "rows" || picker != null || featured.size < 2) return
         fIdx = (fIdx + 1) % featured.size
         setHero(app, featured[fIdx], true)
@@ -253,8 +304,9 @@ class HomeModel {
     fun onNavSelected(app: AppState, idx: Int) {
         when (val key = menuKeys[idx]) {
             "search" -> app.push(Screen.Search(SearchModel()))
-            "addons" -> app.push(Screen.Addons())
-            "settings" -> app.push(Screen.SettingsScreen())
+            "addons" -> app.onMenuAction("addons")
+            "settings" -> app.onMenuAction("settings")
+            "profiles" -> app.onMenuAction("profiles")
             else -> {
                 if (key != category) {
                     loadCategory(app, key)
@@ -293,14 +345,18 @@ class HomeModel {
     // ---------------------------------------------------------------------------
     fun genreChoices(kind: String): List<String> {
         val st = fState[kind] ?: return emptyList()
-        if (st.cat >= 0 && st.cat < catOptions.size) return catOptions[st.cat].genres
+        if (st.cat >= 0 && st.cat < catOptions.size) {
+            val g = catOptions[st.cat].genres
+            return if (hideAdult) filterAdultGenres(g) else g
+        }
         val out = LinkedHashSet<String>()
-        for (c in catOptions) if (!c.genreReq) out.addAll(c.genres)
+        for (c in catOptions) if (!c.genreReq) out.addAll(if (hideAdult) filterAdultGenres(c.genres) else c.genres)
         return out.toList()
     }
 
     private fun updateFilterBar(app: AppState, kind: String) {
         val t = app.t
+        hideAdult = app.hideAdult
         if (kind.isEmpty()) {
             chips = emptyList()
             catOptions = emptyList()
@@ -420,6 +476,9 @@ class HomeModel {
         loadedRev = app.addonsRev
         loadedHist = app.historyRev
         loadedLang = app.settings.lang
+        loadedFav = app.favRev
+        loadedProfile = app.profile.id
+        hideAdult = app.hideAdult
         loading = true
         singleMode = false
         val wasRows = focusArea == "rows"
@@ -427,6 +486,7 @@ class HomeModel {
         curRow = 0
         hero = null
         heroDesc = ""
+        heroBg = ""
         pendingHero = null
         featured = emptyList()
         fIdx = 0
@@ -466,12 +526,22 @@ class HomeModel {
         }
 
         status = t("loading")
+        val now = System.currentTimeMillis() / 1000
         loadJob = app.scope.launch {
             val results = catalogs.map { c ->
                 async {
                     var url = c.base + "/catalog/" + urlEncode(c.kind) + "/" + urlEncode(c.id)
                     if (c.extra.isNotEmpty()) url += "/" + c.extra
-                    Net.getJson("$url.json")
+                    url += ".json"
+                    val cached = cache[url]
+                    if (cached != null && now - cached.first < 300) {
+                        cached.second
+                    } else {
+                        val res = Net.getJson(url)
+                        val metas = if (res.ok) res.data?.optJSONArray("metas").objects() else emptyList()
+                        if (metas.isNotEmpty()) cache[url] = Pair(now, metas)
+                        metas
+                    }
                 }
             }.awaitAll()
             finishLoad(app, catalogs, results)
@@ -496,7 +566,7 @@ class HomeModel {
         }
     }
 
-    private fun finishLoad(app: AppState, catalogs: List<CatalogRef>, results: List<JsonResult>) {
+    private fun finishLoad(app: AppState, catalogs: List<CatalogRef>, results: List<List<org.json.JSONObject>>) {
         val t = app.t
         loading = false
         val defs = ArrayList<RowDef>()
@@ -514,17 +584,26 @@ class HomeModel {
             }
         }
 
+        // Linha "Minha lista" (so na tela inicial)
+        var favRow: RowDef? = null
+        if (category == "home") {
+            val favs = app.store.loadFavorites()
+            if (favs.isNotEmpty()) {
+                favRow = RowDef(t("my_list"), favs)
+                defs.add(favRow)
+            }
+        }
+
         // Linhas dos catalogos, na ordem dos addons
-        val perRow = if (singleMode) 8 else 30
+        val perRow = if (singleMode) 8 else 20
         for (i in catalogs.indices) {
-            val res = results[i]
-            if (!res.ok) continue
-            val metas = res.data?.optJSONArray("metas").objects()
+            val metas = results[i]
             if (metas.isEmpty()) continue
             val c = catalogs[i]
             val chunks = ArrayList<Pair<String, MutableList<Info>>>()
             var n = 0
             for (meta in metas) {
+                if (hideAdult && isAdultMeta(meta)) continue
                 val info = Info.fromMeta(meta, c.base, c.kind)
                 if (info.id.isEmpty() || info.name.isEmpty()) continue
                 if (chunks.isEmpty() || n % perRow == 0) {
@@ -545,7 +624,7 @@ class HomeModel {
         // Destaques do carrossel: ate 2 titulos (com imagem de fundo) de cada linha de catalogo
         val feats = ArrayList<Info>()
         for (d in defs) {
-            if (d === historyRow) continue
+            if (d === historyRow || d === favRow) continue
             var taken = 0
             for (inf in d.items) {
                 if (inf.background.isNotEmpty() && taken < 2 && feats.size < 8) {
@@ -554,8 +633,14 @@ class HomeModel {
                 }
             }
         }
+        // o que voce estava assistindo vai primeiro (com o botao "Continuar")
+        historyRow?.items?.firstOrNull()?.let {
+            feats.add(0, it)
+            if (feats.size > 8) feats.removeAt(feats.size - 1)
+        }
         featured = feats
         fIdx = 0
+        heroIdx = 0
 
         if (defs.isNotEmpty()) {
             status = ""
@@ -585,7 +670,7 @@ fun HomeScreen(app: AppState, m: HomeModel) {
     val t = app.t
 
     // Recarrega quando addons, historico ou idioma mudam (como o focusView do Roku)
-    LaunchedEffect(app.addonsRev, app.historyRev, app.settings.lang) {
+    LaunchedEffect(app.addonsRev, app.historyRev, app.favRev, app.settings.lang, app.profile.id) {
         if (m.isStale(app)) m.loadCategory(app, m.category)
     }
 
@@ -605,7 +690,7 @@ fun HomeScreen(app: AppState, m: HomeModel) {
     LaunchedEffect(Unit) {
         while (true) {
             delay(8000)
-            if (m.focusArea == "rows" || m.picker != null || m.featured.size < 2) continue
+            if (!app.settings.carousel || m.focusArea == "rows" || m.picker != null || m.featured.size < 2) continue
             val next = m.featured[(m.fIdx + 1) % m.featured.size]
             val url = next.background.ifEmpty { next.poster }
             if (url.isNotEmpty()) {
@@ -624,8 +709,8 @@ fun HomeScreen(app: AppState, m: HomeModel) {
     LaunchedEffect(m.focusCmd) {
         if (m.focusCmd == 0) return@LaunchedEffect
         when (m.focusTarget) {
-            "nav" -> m.navReq[m.navIdx.coerceIn(0, 5)].focusSoon()
-            "hero" -> m.heroReq.focusSoon()
+            "nav" -> m.navReq[m.navIdx.coerceIn(0, 6)].focusSoon()
+            "hero" -> if (m.heroIdx == 1 && m.heroPlayable()) m.heroReq2.focusSoon() else m.heroReq.focusSoon()
             "filters" -> if (m.chips.isNotEmpty()) m.chipReq[m.chipIdx.coerceIn(0, m.chips.size - 1)].focusSoon()
             "rows" -> {
                 val row = m.rows.getOrNull(m.curRow) ?: return@LaunchedEffect
@@ -647,6 +732,16 @@ fun HomeScreen(app: AppState, m: HomeModel) {
         m.focusNav()
     }
 
+    // Zoom lento no fundo do banner (efeito cinematografico; desligado por padrao)
+    val zoom = remember { Animatable(1f) }
+    LaunchedEffect(m.heroSeq, app.settings.zoom) {
+        zoom.snapTo(1f)
+        if (app.settings.zoom) zoom.animateTo(1.07f, tween(durationMillis = 11000, easing = LinearEasing))
+    }
+
+    val hero = m.hero
+    val accent = if (hero != null) accentFor(hero.id) else 0xFF8338EC
+
     Box(
         Modifier
             .fillMaxSize()
@@ -655,9 +750,9 @@ fun HomeScreen(app: AppState, m: HomeModel) {
                 val hasHero = m.featured.isNotEmpty()
                 when (e.key) {
                     Key.MediaPlay, Key.MediaPlayPause -> {
-                        // Play abre o destaque atual (fora das linhas)
+                        // Play abre o destaque atual ja procurando a fonte (fora das linhas)
                         if (m.focusArea != "rows" && hasHero) {
-                            m.featured.getOrNull(m.fIdx)?.let { app.openDetails(it) }
+                            m.heroPlayInfo()?.let { app.openDetails(it, autoplay = true) }
                             true
                         } else {
                             false
@@ -684,15 +779,27 @@ fun HomeScreen(app: AppState, m: HomeModel) {
                         true
                     }
                     Key.DirectionLeft -> when (m.focusArea) {
-                        "hero" -> true
+                        "hero" -> {
+                            if (m.heroIdx == 1) {
+                                m.heroIdx = 0
+                                m.requestFocus("hero")
+                            }
+                            true
+                        }
                         "nav" -> m.navIdx == 0
                         "filters" -> m.chipIdx == 0
                         "rows" -> m.rows.getOrNull(m.curRow)?.focusedIdx == 0
                         else -> false
                     }
                     Key.DirectionRight -> when (m.focusArea) {
-                        "hero" -> true
-                        "nav" -> m.navIdx == 5
+                        "hero" -> {
+                            if (m.heroIdx == 0 && m.heroPlayable()) {
+                                m.heroIdx = 1
+                                m.requestFocus("hero")
+                            }
+                            true
+                        }
+                        "nav" -> m.navIdx == 6
                         "filters" -> m.chipIdx >= m.chips.size - 1
                         "rows" -> m.rows.getOrNull(m.curRow)?.let { it.focusedIdx >= it.items.size - 1 } ?: false
                         else -> false
@@ -701,11 +808,29 @@ fun HomeScreen(app: AppState, m: HomeModel) {
                 }
             }
     ) {
-        FadingBackdrop(m.hero?.let { it.background.ifEmpty { it.poster } } ?: "", m.heroAnimate)
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            scaleX = zoom.value
+            scaleY = zoom.value
+            transformOrigin = TransformOrigin(0.5f, 0.28f)
+        }) {
+            FadingBackdrop(m.heroBg, m.heroAnimate)
+        }
+        // Luz ambiente colorida (muda com cada titulo)
+        if (app.settings.ambient && hero != null) AccentGlow(accent, -260, 20, 1500, 1000, 0.5f)
+        Box(Modifier.fillMaxSize().background(K.GradLeft))
+        Box(Modifier.fillMaxSize().background(K.GradBottom))
+        Box(Modifier.fillMaxWidth().height(d(200)).background(K.GradTop))
 
-        // Marca e navegacao
+        // Marca e navegacao (barra de vidro; o ultimo item e o perfil)
         KLabel("KINORA", 80, 38, 400, 50, 30, weight = W.Bold, color = K.White)
-        val navLabels = listOf(t("nav_home"), t("nav_movies"), t("nav_series"), t("nav_search"), t("nav_addons"), t("nav_settings"))
+        Box(
+            Modifier.at(590, 28).box(1262, 72).clip(RoundedCornerShape(d(36)))
+                .background(Color(0x2AFFFFFF))
+                .border(d(2), Color(0x41FFFFFF), RoundedCornerShape(d(36)))
+        )
+        var pname = app.profile.name.ifEmpty { t("pf_default_name") }
+        if (pname.length > 11) pname = pname.take(10) + "…"
+        val navLabels = listOf(t("nav_home"), t("nav_movies"), t("nav_series"), t("nav_search"), t("nav_addons"), t("nav_settings"), pname)
         Row(Modifier.at(600, 36), horizontalArrangement = Arrangement.spacedBy(d(8))) {
             navLabels.forEachIndexed { i, label ->
                 NavPill(
@@ -725,7 +850,7 @@ fun HomeScreen(app: AppState, m: HomeModel) {
             "series" -> 2
             else -> 0
         }
-        Box(Modifier.at(600 + catIdx * 178 + 35, 98).box(100, 4).background(K.White))
+        Box(Modifier.at(600 + catIdx * 178 + 40, 98).box(90, 6).clip(RoundedCornerShape(d(3))).background(Color(accent)))
 
         // Filtros
         if (m.chips.isNotEmpty()) {
@@ -747,25 +872,56 @@ fun HomeScreen(app: AppState, m: HomeModel) {
             }
         }
 
-        // Banner do titulo em foco
-        m.hero?.let { h ->
+        // Banner do titulo em foco: titulo, selos (tipo, IMDb), ano/generos e sinopse
+        hero?.let { h ->
             KLabel(h.name, 80, 84, 1000, 140, 46, weight = W.Bold, color = K.White, maxLines = 2, vAlign = Alignment.Bottom)
-            KLabel(metaLine(t, h, true), 80, 228, 1000, 40, 22, weight = W.Medium, color = K.Meta)
+            Row(Modifier.at(80, 228).height(d(38)), verticalAlignment = Alignment.CenterVertically) {
+                var k = t.kindSingular(h.kind)
+                if (h.season > 0 || h.episode > 0) k = (k + " " + t.epCode(h.season, h.episode)).trim()
+                if (k.isNotEmpty()) {
+                    Badge(k.uppercase(), Color(0x3CFFFFFF), K.White, 38, 19)
+                    Box(Modifier.width(d(14)))
+                }
+                if (h.rating.isNotEmpty()) {
+                    Badge("IMDb " + h.rating, Color(0xFFF5C518), K.Bg, 38, 19)
+                    Box(Modifier.width(d(14)))
+                }
+                KText(listOf(h.year, h.genres).filter { it.isNotEmpty() }.joinToString("  •  "), 22, weight = W.Medium, color = K.Meta)
+            }
             KLabel(m.heroDesc, 80, 270, 860, 70, 21, color = K.Desc, maxLines = 2)
         }
 
-        // Carrossel: botao Detalhes e pontos (escondidos quando o foco esta nas linhas)
+        // Carrossel: botoes Detalhes e Assistir/Continuar e pontos (escondidos nas linhas)
         val carousel = m.focusArea != "rows"
         if (m.featured.isNotEmpty() && carousel) {
-            HeroButton(
+            IconPill(
                 text = t("hero_details"),
+                icon = R.drawable.ic_info,
+                iconDark = R.drawable.ic_info_dark,
+                w = 320, h = 72,
                 modifier = Modifier.at(80, 354).focusRequester(m.heroReq),
                 onFocus = {
                     m.focusArea = "hero"
+                    m.heroIdx = 0
                     m.cancelNavJob()
                 },
                 onClick = { m.featured.getOrNull(m.fIdx)?.let { app.openDetails(it) } },
             )
+            if (m.heroPlayable()) {
+                IconPill(
+                    text = if (hero?.videoId?.isNotEmpty() == true) t("hero_continue") else t("details_watch"),
+                    icon = R.drawable.ic_play,
+                    iconDark = R.drawable.ic_play_dark,
+                    w = 320, h = 72,
+                    modifier = Modifier.at(416, 354).focusRequester(m.heroReq2),
+                    onFocus = {
+                        m.focusArea = "hero"
+                        m.heroIdx = 1
+                        m.cancelNavJob()
+                    },
+                    onClick = { m.heroPlayInfo()?.let { app.openDetails(it, autoplay = true) } },
+                )
+            }
         }
         if (m.featured.size > 1 && carousel) {
             Row(Modifier.at(80, 446), horizontalArrangement = Arrangement.spacedBy(d(8))) {
@@ -780,13 +936,12 @@ fun HomeScreen(app: AppState, m: HomeModel) {
             }
         }
 
-        // Linhas
-        var y = 548
+        // Linhas: a em foco fica em y=540; com titulo 90 px de respiro, sem titulo 24 px
+        var y = 540
         for (i in m.curRow until m.rows.size) {
             val row = m.rows[i]
             if (i > m.curRow) {
-                val prevTitled = row.title.isNotEmpty()
-                y += 240 + if (prevTitled) 90 else 24
+                y += 300 + if (row.title.isNotEmpty()) 90 else 24
             }
             if (y >= 1080) break
             key(row) {
@@ -794,8 +949,9 @@ fun HomeScreen(app: AppState, m: HomeModel) {
             }
         }
 
+        if (m.loading) Spinner(912, 620)
         if (m.rows.isEmpty() && m.status.isNotEmpty()) {
-            KLabel(m.status, 400, 520, 1100, 180, 28, weight = W.Medium, color = K.Meta, maxLines = 4, align = TextAlign.Center)
+            KLabel(m.status, 400, 560, 1100, 180, 28, weight = W.Medium, color = K.Meta, maxLines = 4, align = TextAlign.Center)
         }
 
         m.picker?.let { p -> key(p) { FilterPicker(app, m, p) } }
@@ -829,15 +985,15 @@ private fun HomeRowView(app: AppState, m: HomeModel, row: RowDef, rowIndex: Int,
     }
     LazyRow(
         state = row.listState,
-        modifier = Modifier.at(56, y).width(d(1864)).height(d(240)),
+        modifier = Modifier.at(56, y).width(d(1864)).height(d(300)),
         contentPadding = PaddingValues(start = d(14), end = d(60)),
         horizontalArrangement = Arrangement.spacedBy(d(22)),
     ) {
         itemsIndexed(row.items) { idx, info ->
             PosterCard(
                 url = info.poster,
-                w = 160,
-                h = 240,
+                w = 200,
+                h = 300,
                 modifier = if (idx == row.focusedIdx) Modifier.focusRequester(row.requester) else Modifier,
                 progress = progressOf(info),
                 onFocus = {
@@ -919,41 +1075,6 @@ private fun FadingBackdrop(url: String, animate: Boolean) {
             } else {
                 Box(Modifier.fillMaxSize())
             }
-        }
-        Box(Modifier.fillMaxSize().background(K.GradLeft))
-        Box(Modifier.fillMaxSize().background(K.GradBottom))
-        Box(Modifier.fillMaxWidth().height(d(200)).background(K.GradTop))
-    }
-}
-
-/**
- * Botao do banner (320x72): "vidro" com texto branco; em foco fica branco com texto escuro.
- * Icone + texto centralizados.
- */
-@Composable
-private fun HeroButton(text: String, modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    Box(
-        modifier
-            .box(320, 72)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocus()
-            }
-            .focusable()
-            .tvClick(null, onClick)
-            .clip(RoundedCornerShape(d(36)))
-            .background(if (focused) K.White else Color(0x46FFFFFF)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(
-                painter = painterResource(if (focused) R.drawable.ic_info_dark else R.drawable.ic_info),
-                contentDescription = null,
-                modifier = Modifier.box(34, 34),
-            )
-            Box(Modifier.width(d(16)))
-            KText(text, 26, weight = W.Bold, color = if (focused) K.Bg else K.White)
         }
     }
 }

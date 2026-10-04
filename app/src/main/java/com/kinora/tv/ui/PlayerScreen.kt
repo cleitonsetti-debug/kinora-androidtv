@@ -74,22 +74,25 @@ import com.kinora.tv.data.guessStreamFormat
 import com.kinora.tv.data.langMatches
 import com.kinora.tv.data.langName
 import com.kinora.tv.data.toLang2
+import com.kinora.tv.data.prefCode
+import com.kinora.tv.data.StreamOption
+import androidx.compose.ui.graphics.Brush
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // =============================================================================
-// Player proprio (igual ao Kinora v1.3 do Roku). A tela recebe as teclas do controle;
-// o PlayerView do Media3 so desenha o video e as legendas (sem a interface nativa).
+// Player proprio (igual ao Kinora v1.5 do Roku, estilo Netflix/YouTube). A tela recebe as
+// teclas do controle; o PlayerView do Media3 so desenha o video e as legendas.
 //
-//  Controles escondidos:  Baixo/Cima/Menu = mostrar controles   OK = pausar/continuar
-//                         Esquerda/Direita = abre a barra de tempo   Voltar = sair
+//  Controles escondidos:  Baixo/Cima/Menu = mostrar controles   OK = pausar (so a barra + icone)
+//                         Esquerda/Direita = pula NA HORA (10/15/30 s, acelera se repetir)
+//                         mostrando SO a barra vermelha com os tempos   Voltar = sair
 //  Controles visiveis:    Esquerda/Direita escolhem o botao, OK ativa
-//                         (-10 s, pausar, +10 s, ir para, legendas, audio, proximo ep., fonte)
-//                         Cima = barra de tempo; Voltar = esconder
-//  Barra de tempo: Esquerda/Direita movem o ponto (passos que aceleram), OK confirma;
-//                  parado por 3 s confirma sozinho; Voltar cancela
+//                         (-/+ salto, pausar, ir para, legendas, audio, proximo ep., fonte)
+//                         Cima = barra de tempo ("ir para", vale ao confirmar com OK); Voltar = esconder
 //  Tambem: Play = pausar, retroceder/avancar = -/+30 s
+//  Se a fonte der erro ou demorar mais de 30 s, tenta a proxima da lista (ate 5 vezes).
 // =============================================================================
 
 private class PlayerButtonDef(val label: String, val icon: Int, val action: String)
@@ -109,7 +112,17 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     private val reqNextEp: PlaylistItem? = request.nextEp
     private val firstVideoId = request.videoId
     var nextEp: PlaylistItem? = null
-    val preferAddonUrl = request.source?.addonUrl ?: ""
+    var preferAddonUrl = request.source?.addonUrl ?: ""
+
+    // outras fontes da lista: se esta falhar, tenta a proxima
+    private var alts: List<StreamOption> = request.alts
+    private var altIdx = request.altIdx
+    private var altTries = 0
+
+    // legenda/audio escolhidos antes para este titulo
+    private val titleId = request.info.id
+    private var prefSub = ""
+    private var prefAudio = ""
 
     // Estado da tela
     var loadingText by mutableStateOf("")
@@ -118,6 +131,8 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     var introVisible by mutableStateOf(false)
     var hintVisible by mutableStateOf(false)
     var ctrlVisible by mutableStateOf(false)
+    /** barra "so o essencial" (pausa ou salto): progresso e tempos, sem titulo nem botoes */
+    var mini by mutableStateOf(false)
     var btnIdx by mutableIntStateOf(1)
     var panelOpen by mutableStateOf(false)
     var panelMode = "subs"
@@ -136,11 +151,12 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     // Barra de tempo
     var scrubbing by mutableStateOf(false)
     var scrubPos by mutableFloatStateOf(0f)
-    private var scrubOrigin = "buttons"
+    var scrubOrigin by mutableStateOf("buttons")
     private var scrubMoved = false
     private var scrubIdx = 0
     private var scrubDir = 0
     private var scrubAt = 0L
+    private var lastSeekAt = 0L
 
     var switching = false
     var done = false
@@ -155,12 +171,21 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     private var hintJob: Job? = null
     private var scrubJob: Job? = null
     private var prepareJob: Job? = null
+    private var bufferJob: Job? = null
 
     val t get() = app.t
 
     init {
         computeNext()
+        val (ps, pa) = app.store.loadTrackPrefs(titleId)
+        prefSub = ps
+        prefAudio = pa
     }
+
+    val jump: Int get() = app.settings.jump.let { if (it < 5) 10 else it }
+
+    private fun effSub(): String = prefSub.ifEmpty { app.settings.subLang }
+    private fun effAudio(): String = prefAudio.ifEmpty { app.settings.audioLang }
 
     private fun computeNext() {
         val idx = playlist.indexOfFirst { it.id == videoId }
@@ -179,7 +204,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     // Preparo: legendas dos addons -> inicia o video
     // ---------------------------------------------------------------------------
     fun beginPrepare() {
-        loadingText = t("player_preparing")
+        if (loadingText.isEmpty()) loadingText = t("player_preparing")
         prepareJob?.cancel()
         prepareJob = app.scope.launch {
             val addonSubs = Streams.fetchSubs(app.addons, info.kind, videoId)
@@ -199,7 +224,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
 
     private fun buildSubConfigs(addonSubs: List<SubTrack>): List<MediaItem.SubtitleConfiguration> {
         val all = streamSubs + addonSubs
-        val pref = app.settings.subLang
+        val pref = effSub()
         val ordered = if (pref != "off") {
             all.filter { langMatches(it.lang, pref) } + all.filter { !langMatches(it.lang, pref) }
         } else {
@@ -228,13 +253,15 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
             "mp4" -> builder.setMimeType(MimeTypes.VIDEO_MP4)
         }
 
-        // Idiomas preferidos dos Ajustes
+        // Idiomas preferidos (escolha anterior deste titulo ou os Ajustes)
         val st = app.settings
+        val sub = effSub()
+        val aud = effAudio()
         val params = player.trackSelectionParameters.buildUpon()
             .clearOverrides()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, st.subLang == "off")
-        if (st.subLang != "off") params.setPreferredTextLanguage(st.subLang)
-        if (st.audioLang != "auto") params.setPreferredAudioLanguage(st.audioLang)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, sub == "off")
+        if (sub != "off") params.setPreferredTextLanguage(sub)
+        if (aud != "auto") params.setPreferredAudioLanguage(aud)
         player.trackSelectionParameters = params.build()
 
         val start = if (st.resume) app.store.getSavedPosition(videoId) else 0
@@ -247,13 +274,46 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         finished = false
         introShown = false
         introVisible = false
+        mini = false
         hideControls()
+
+        // demorou demais para comecar: tenta a proxima fonte
+        bufferJob?.cancel()
+        bufferJob = app.scope.launch {
+            delay(30000)
+            if (player.isPlaying || paused || switching || done) return@launch
+            if (tryNextSource()) return@launch
+            closePlayer()
+            app.showMessage(t("play_error_title"), t("player_timeout"))
+        }
+    }
+
+    /** Fonte falhou (erro ou espera longa): tenta a proxima da lista, ate 5 vezes. */
+    private fun tryNextSource(): Boolean {
+        if (altIdx < 0 || altTries >= 5) return false
+        val n = altIdx + 1
+        if (n >= alts.size) return false
+        altTries++
+        altIdx = n
+        val s = alts[n]
+        url = s.url
+        format = guessStreamFormat(s.url)
+        headers = s.headers
+        source = SourceInfo(s.addonName, s.addonUrl, s.title)
+        streamSubs = s.subs
+        preferAddonUrl = s.addonUrl
+        onSourceChanged?.invoke(s.headers)
+        player.stop()
+        beginPrepare()
+        loadingText = t.f2("player_try_next", (n + 1).toString(), alts.size.toString())
+        return true
     }
 
     // ---------------------------------------------------------------------------
     // Estados do video
     // ---------------------------------------------------------------------------
     fun onPlaying() {
+        bufferJob?.cancel()
         loadingText = ""
         paused = false
         if (centerIcon != 0) {
@@ -264,7 +324,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
                 centerIcon = 0
             }
         }
-        if (ctrlVisible) restartHide()
+        if (ctrlVisible || mini) restartHide()
         if (!introShown) {
             introShown = true
             showIntro()
@@ -275,7 +335,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         paused = true
         iconJob?.cancel()
         centerIcon = R.drawable.ic_pause_big
-        if (!switching && !panelOpen) showControls()
+        if (!switching && !panelOpen && !ctrlVisible && !scrubbing) showMini()
     }
 
     fun onBuffering() {
@@ -294,6 +354,8 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
 
     fun onError(error: PlaybackException) {
         if (switching || done) return
+        bufferJob?.cancel()
+        if (tryNextSource()) return
         saveNow()
         closePlayer()
         app.showMessage(
@@ -307,7 +369,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         val d = player.duration
         dur = if (d > 0) d / 1000f else 0f
         pos = player.currentPosition / 1000f
-        if (panelOpen || switching || ctrlVisible) return
+        if (panelOpen || switching || ctrlVisible || scrubbing || mini) return
         if (nextEp == null) return
         val st = player.playbackState
         if (st != Player.STATE_READY && st != Player.STATE_BUFFERING) return
@@ -335,7 +397,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     }
 
     private fun showIntro() {
-        if (!app.settings.intro || ctrlVisible) {
+        if (!app.settings.intro || ctrlVisible || scrubbing) {
             showHintOnce()
             return
         }
@@ -375,10 +437,10 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     // ---------------------------------------------------------------------------
     fun buttons(): List<PlayerButtonDef> {
         val list = ArrayList<PlayerButtonDef>()
-        list.add(PlayerButtonDef("-10 s", R.drawable.ic_rewind, "back10"))
+        list.add(PlayerButtonDef("-$jump s", R.drawable.ic_rewind, "back10"))
         if (paused) list.add(PlayerButtonDef(t("player_resume"), R.drawable.ic_play, "pause"))
         else list.add(PlayerButtonDef(t("player_pause"), R.drawable.ic_pause, "pause"))
-        list.add(PlayerButtonDef("+10 s", R.drawable.ic_forward, "fwd10"))
+        list.add(PlayerButtonDef("+$jump s", R.drawable.ic_forward, "fwd10"))
         list.add(PlayerButtonDef(t("player_goto"), R.drawable.ic_scrub, "scrub"))
         list.add(PlayerButtonDef(t("player_subs"), R.drawable.ic_subs, "subs"))
         list.add(PlayerButtonDef(t("player_audio"), R.drawable.ic_audio, "audio"))
@@ -405,29 +467,43 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         hintVisible = false
         introVisible = false
         ctrlVisible = true
+        mini = false
         restartHide()
     }
 
     fun hideControls() {
         ctrlVisible = false
         hideJob?.cancel()
+        // pausado: continua so a barra, como nos outros apps
+        if (paused && !scrubbing) showMini()
     }
 
-    /** Some sozinho depois de 7 s, exceto se o video estiver pausado. */
+    /** Barra "so o essencial" (pausa): progresso e tempos, sem titulo nem botoes. */
+    private fun showMini() {
+        if (switching || done) return
+        mini = true
+        introVisible = false
+        hintVisible = false
+        tick()
+        restartHide()
+    }
+
+    /** Some sozinho depois de 5 s, exceto se o video estiver pausado. */
     fun restartHide() {
         hideJob?.cancel()
         if (scrubbing || paused) return
         hideJob = app.scope.launch {
-            delay(7000)
-            if (!panelOpen && !scrubbing && !paused) hideControls()
+            delay(5000)
+            if (panelOpen || scrubbing || paused) return@launch
+            if (ctrlVisible) hideControls() else mini = false
         }
     }
 
     fun pressButton(action: String) {
         restartHide()
         when (action) {
-            "back10" -> seekBy(-10)
-            "fwd10" -> seekBy(10)
+            "back10" -> seekBy(-jump)
+            "fwd10" -> seekBy(jump)
             "pause" -> togglePause()
             "scrub" -> enterScrub("buttons")
             "subs" -> openTrackPanel("subs")
@@ -461,23 +537,29 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     // ---------------------------------------------------------------------------
     fun enterScrub(origin: String): Boolean {
         if (player.duration <= 0) return false
-        if (!ctrlVisible) showControls()
         scrubOrigin = origin
         scrubMoved = false
         scrubbing = true
         scrubPos = player.currentPosition / 1000f
         scrubIdx = 0
         scrubDir = 0
+        lastSeekAt = 0L
         hideJob?.cancel()
+        introVisible = false
+        hintVisible = false
+        nextVisible = false
+        tick()
         restartScrubTimer()
         return true
     }
 
     private fun restartScrubTimer() {
         scrubJob?.cancel()
+        // pelos controles: 3 s para confirmar; "so a barra": confirma logo ao parar
+        val wait = if (scrubOrigin == "buttons") 3000L else 1300L
         scrubJob = app.scope.launch {
-            delay(3000)
-            // Parado por 3 s: confirma o ponto escolhido (ou sai, se nao mexeu)
+            delay(wait)
+            // Parado por um instante: confirma o ponto escolhido (ou sai, se nao mexeu)
             if (scrubbing) {
                 if (scrubMoved) commitScrub() else exitScrub()
             }
@@ -487,12 +569,13 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     fun exitScrub() {
         scrubbing = false
         scrubJob?.cancel()
-        if (scrubOrigin == "hidden") hideControls() else restartHide()
+        if (ctrlVisible || mini) restartHide()
     }
 
-    /** Passos de 10, 10, 20, 30, 60, 90 e 120 s: repetir a tecla acelera. */
+    /** Passos de salto x1, x1, x2, x3, x6, x9, x12: repetir a tecla acelera. */
     fun moveScrub(dir: Int) {
-        val steps = intArrayOf(10, 10, 20, 30, 60, 90, 120)
+        val j = jump
+        val steps = intArrayOf(j, j, j * 2, j * 3, j * 6, j * 9, j * 12)
         val now = System.currentTimeMillis()
         if (dir == scrubDir && now - scrubAt < 700) {
             if (scrubIdx < steps.size - 1) scrubIdx++
@@ -512,12 +595,18 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         scrubPos = tgt
         scrubMoved = true
         restartScrubTimer()
+        // Esquerda/Direita sem controles: pula na hora (no maximo a cada 0,45 s; o ponto final vale ao parar)
+        if (scrubOrigin == "hidden") {
+            val now = System.currentTimeMillis()
+            if (now - lastSeekAt > 450) {
+                player.seekTo((scrubPos * 1000).toLong())
+                lastSeekAt = now
+            }
+        }
     }
 
     fun commitScrub() {
-        val target = scrubPos
-        player.seekTo((target * 1000).toLong())
-        showToast(t("player_goto") + "  " + formatTime(target.toInt()))
+        player.seekTo((scrubPos * 1000).toLong())
         exitScrub()
     }
 
@@ -540,15 +629,20 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         prepareJob?.cancel()
         prepareJob = app.scope.launch {
             val res = Streams.fetch(app.addons, info.kind, nxt.id)
-            val found = res.found
+            val found = Streams.sortByQuality(res.found, app.settings.quality)
             // prefere a mesma fonte (addon) do episodio anterior
-            val s = found.firstOrNull { it.addonUrl == preferAddonUrl } ?: found.firstOrNull()
+            var si = found.indexOfFirst { it.addonUrl == preferAddonUrl }
+            if (si < 0 && found.isNotEmpty()) si = 0
+            val s = found.getOrNull(si)
             if (s == null) {
                 loadingText = ""
                 closePlayer()
                 app.showMessage(t("play_error_title"), t("player_no_next_sources"))
                 return@launch
             }
+            alts = found
+            altIdx = si
+            altTries = 0
             url = s.url
             format = guessStreamFormat(s.url)
             headers = s.headers
@@ -596,6 +690,8 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                     .build()
+                prefSub = "off"
+                app.store.saveTrackPref(titleId, "subLang", "off")
             }
         }
         for (group in player.currentTracks.groups) {
@@ -610,11 +706,22 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
                 labels.add(label)
                 val g: Tracks.Group = group
                 val trackIndex = i
+                val code = prefCode(f.language ?: "")
                 actions.add {
                     player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(type, false)
                         .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, trackIndex))
                         .build()
+                    // lembra a escolha para este titulo
+                    if (code.isNotEmpty() && code != "und") {
+                        if (mode == "subs") {
+                            prefSub = code
+                            app.store.saveTrackPref(titleId, "subLang", code)
+                        } else {
+                            prefAudio = code
+                            app.store.saveTrackPref(titleId, "audioLang", code)
+                        }
+                    }
                 }
             }
         }
@@ -643,14 +750,21 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     // ---------------------------------------------------------------------------
     // Historico ("Continuar assistindo")
     // ---------------------------------------------------------------------------
+    /** Entrada enxuta do historico (a sinopse e o fundo sao buscados quando precisa). */
     private fun buildEntry(vid: String, sn: Int, ep: Int, p: Int, d: Int) =
-        info.copy(
+        Info(
+            id = info.id,
+            kind = info.kind,
+            name = info.name,
+            poster = info.poster,
+            year = info.year,
+            addon = info.addon,
+            src = source?.addonUrl ?: "",
             videoId = vid,
             season = sn,
             episode = ep,
             position = p,
             duration = d,
-            description = info.description.take(120),
             ts = System.currentTimeMillis() / 1000,
         )
 
@@ -658,6 +772,8 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     fun finishEpisode() {
         if (finished) return
         finished = true
+        // o video de teste nao marca nada como assistido
+        if ((source?.addonUrl ?: "").isNotEmpty()) app.store.markWatched(videoId)
         app.store.removeHistory(videoId)
         nextEp?.let { nxt -> app.store.upsertHistory(buildEntry(nxt.id, nxt.season, nxt.episode, 0, 0)) }
         app.bumpHistory()
@@ -682,6 +798,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         if (done) return
         done = true
         prepareJob?.cancel()
+        bufferJob?.cancel()
         player.stop()
         if (app.stack.lastOrNull() is Screen.Player) app.pop()
     }
@@ -693,7 +810,11 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         when {
             panelOpen -> closePanel()
             scrubbing -> exitScrub()
-            ctrlVisible -> hideControls()
+            ctrlVisible -> {
+                ctrlVisible = false
+                hideJob?.cancel()
+                if (paused) showMini()
+            }
             else -> {
                 saveNow()
                 closePlayer()
@@ -722,7 +843,14 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
                 key == Key.MediaRewind -> scrubTo(scrubPos - 30)
                 key == Key.MediaFastForward -> scrubTo(scrubPos + 30)
                 (isOk && repeat == 0) || key == Key.MediaPlay || key == Key.MediaPlayPause -> commitScrub()
-                key == Key.DirectionDown || key == Key.DirectionUp -> exitScrub()
+                key == Key.DirectionDown || key == Key.DirectionUp -> {
+                    if (scrubOrigin == "hidden") {
+                        commitScrub()
+                        showControls()
+                    } else {
+                        exitScrub()
+                    }
+                }
             }
             return true
         }
@@ -733,12 +861,9 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
                 if (repeat == 0) togglePause()
                 return true
             }
-            Key.MediaRewind -> {
-                seekBy(-30)
-                return true
-            }
-            Key.MediaFastForward -> {
-                seekBy(30)
+            Key.MediaRewind, Key.MediaFastForward -> {
+                val delta = if (key == Key.MediaFastForward) 30 else -30
+                if (enterScrub(if (ctrlVisible) "buttons" else "hidden")) scrubTo(scrubPos + delta) else seekBy(delta)
                 return true
             }
         }
@@ -770,7 +895,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
             key == Key.DirectionDown || key == Key.DirectionUp || key == Key.Menu -> showControls()
             key == Key.DirectionLeft || key == Key.DirectionRight -> {
                 val dir = if (key == Key.DirectionRight) 1 else -1
-                if (enterScrub("hidden")) moveScrub(dir) else seekBy(dir * 10)
+                if (enterScrub("hidden")) moveScrub(dir) else seekBy(dir * jump)
             }
             else -> return false
         }
@@ -787,7 +912,7 @@ fun PlayerScreen(app: AppState, req: PlayRequest) {
 
     val http = remember {
         DefaultHttpDataSource.Factory()
-            .setUserAgent("KinoraAndroidTV/1.3")
+            .setUserAgent(com.kinora.tv.data.Net.UA)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(req.headers)
     }
@@ -913,7 +1038,8 @@ fun PlayerScreen(app: AppState, req: PlayRequest) {
             KLabel(t("player_hint"), 60, 40, 1400, 40, 22, color = Color(0xCCFFFFFF))
         }
         if (m.loadingText.isNotEmpty()) {
-            KLabel(m.loadingText, 0, 500, 1920, 60, 30, weight = W.Medium, color = K.White, align = TextAlign.Center)
+            Spinner(912, 420)
+            KLabel(m.loadingText, 0, 530, 1920, 60, 30, weight = W.Medium, color = K.White, align = TextAlign.Center)
         }
         if (m.centerIcon != 0) {
             Image(
@@ -927,6 +1053,7 @@ fun PlayerScreen(app: AppState, req: PlayRequest) {
         }
 
         if (m.nextVisible) NextCard(m)
+        if (m.ctrlVisible || m.scrubbing || m.mini) ProgressBar(m)
         if (m.ctrlVisible) Controls(m)
         if (m.panelOpen) SidePanel(m)
     }
@@ -950,15 +1077,6 @@ private fun IntroCard(m: PlayerModel) {
     }
 }
 
-@Composable
-private fun Badge(text: String, bg: Color, fg: Color) {
-    Box(
-        Modifier.height(d(38)).clip(RoundedCornerShape(d(8))).background(bg).padding(horizontal = d(16)),
-        contentAlignment = Alignment.Center,
-    ) {
-        KText(text, 20, weight = W.Bold, color = fg)
-    }
-}
 
 @Composable
 private fun NextCard(m: PlayerModel) {
@@ -974,59 +1092,60 @@ private fun NextCard(m: PlayerModel) {
     KLabel(hint, 1148, 678, 664, 40, 22, weight = W.Medium, color = Color(0xFFA78BFA))
 }
 
+/** Sombras, barra vermelha de progresso e tempos (controles, pausa e salto). */
 @Composable
-private fun Controls(m: PlayerModel) {
+private fun ProgressBar(m: PlayerModel) {
     val scrubbing = m.scrubbing
-    Box(Modifier.fillMaxSize().alpha(0.92f).background(K.GradBottom))
-    KLabel(m.info.name, 80, 646, 1700, 60, 38, weight = W.Bold, color = K.White)
-    KLabel(m.ctlInfo(), 80, 710, 1700, 40, 24, weight = W.Medium, color = K.Meta)
+    if (m.ctrlVisible) {
+        Box(Modifier.at(0, 520).box(1920, 560).background(Brush.verticalGradient(listOf(Color(0x00000000), Color(0xDE000000)))))
+        Box(Modifier.fillMaxWidth().height(d(200)).background(K.GradTop))
+    } else {
+        Box(Modifier.at(0, 860).box(1920, 220).background(Brush.verticalGradient(listOf(Color(0x05000000), Color(0xA1000000)))))
+    }
 
-    // Barra de progresso (mais grossa e com bolinha maior no modo "ir para")
+    // ajustando: barra mais grossa e bolinha maior
     val posSec = if (scrubbing) m.scrubPos else m.pos
     val ratio = if (m.dur > 0) (posSec / m.dur).coerceIn(0f, 1f) else 0f
     val fillW = (1760 * ratio).toInt()
     val th = if (scrubbing) 16 else 10
     val ks = if (scrubbing) 40 else 28
-    val barTop = 795 - th / 2
+    val barTop = 997 - th / 2
+    val red = Color(0xFFE50914)
     Box(Modifier.at(80, barTop).box(1760, th).clip(RoundedCornerShape(d(th / 2))).background(Color(0x46FFFFFF)))
     if (fillW >= 12) {
-        Box(Modifier.at(80, barTop).box(fillW, th).clip(RoundedCornerShape(d(th / 2))).background(K.White))
+        Box(Modifier.at(80, barTop).box(fillW, th).clip(RoundedCornerShape(d(th / 2))).background(red))
     }
-    Box(Modifier.at(80 + fillW - ks / 2, 795 - ks / 2).box(ks, ks).clip(CircleShape).background(K.White))
+    Box(Modifier.at(80 + fillW - ks / 2, 997 - ks / 2).box(ks, ks).clip(CircleShape).background(red))
 
-    if (scrubbing) {
-        KLabel(m.t("player_scrub_hint"), 1000, 754, 840, 36, 21, weight = W.Medium, color = K.Meta, align = TextAlign.End)
-        var txt = formatTime(posSec.toInt())
-        if (m.dur > 0) txt += "  /  " + formatTime(m.dur.toInt())
+    // tempo atual / total a esquerda, tempo restante a direita
+    if (m.dur > 0) {
+        KLabel(formatTime(posSec.toInt()) + "  /  " + formatTime(m.dur.toInt()), 80, 940, 700, 38, 24, weight = W.Medium, color = K.White)
+        KLabel("-" + formatTime((m.dur - posSec).toInt()), 1240, 940, 600, 38, 24, weight = W.Medium, color = Color(0xFFE6E6EE), align = TextAlign.End)
+    } else {
+        KLabel(formatTime(posSec.toInt()), 80, 940, 700, 38, 24, weight = W.Medium, color = K.White)
+    }
+
+    // "Ir para" aberto pelos controles: dica e balao com o tempo de destino
+    if (scrubbing && m.scrubOrigin == "buttons") {
+        KLabel(m.t("player_scrub_hint"), 1000, 846, 840, 36, 21, weight = W.Medium, color = K.Meta, align = TextAlign.End)
         val tx = (80 + fillW - 125).coerceIn(80, 1590)
         Box(
-            Modifier.at(tx, 818).box(250, 44).clip(RoundedCornerShape(d(10))).background(K.White),
+            Modifier.at(tx, 890).box(250, 44).clip(RoundedCornerShape(d(10))).background(K.White),
             contentAlignment = Alignment.Center,
         ) {
-            KText(txt, 21, weight = W.Bold, color = K.Bg, align = TextAlign.Center)
-        }
-    } else {
-        KLabel(formatTime(m.pos.toInt()), 80, 812, 400, 36, 22, weight = W.Medium, color = K.White)
-        if (m.dur > 0) {
-            KLabel(formatTime(m.dur.toInt()), 1440, 812, 400, 36, 22, weight = W.Medium, color = K.White, align = TextAlign.End)
+            KText(formatTime(posSec.toInt()), 21, weight = W.Bold, color = K.Bg, align = TextAlign.Center)
         }
     }
+}
 
+@Composable
+private fun Controls(m: PlayerModel) {
+    KLabel(m.info.name, 80, 676, 1700, 60, 38, weight = W.Bold, color = K.White)
+    KLabel(m.ctlInfo(), 80, 740, 1700, 40, 24, weight = W.Medium, color = K.Meta)
     // Botoes com icone
-    Row(Modifier.at(80, 868), horizontalArrangement = Arrangement.spacedBy(d(12))) {
+    Row(Modifier.at(80, 800), horizontalArrangement = Arrangement.spacedBy(d(12))) {
         m.buttons().forEachIndexed { i, b ->
-            val focused = i == m.btnIdx && !scrubbing
-            Box(
-                Modifier.box(130, 112).clip(RoundedCornerShape(d(14)))
-                    .background(if (focused) Color(0x4DFFFFFF) else Color.Transparent)
-            ) {
-                Image(
-                    painter = painterResource(b.icon),
-                    contentDescription = null,
-                    modifier = Modifier.at(37, 12).box(56, 56),
-                )
-                KLabel(b.label, 0, 76, 130, 30, 17, weight = W.Medium, color = Color(0xFFE6E6EE), align = TextAlign.Center)
-            }
+            IconButtonTile(b.label, b.icon, 130, 112, focused = i == m.btnIdx && !m.scrubbing)
         }
     }
 }

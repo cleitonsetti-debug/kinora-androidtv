@@ -38,11 +38,14 @@ fun KinoraApp(app: AppState) {
                             is Screen.SettingsScreen -> SettingsScreen(app, top)
                             is Screen.Details -> DetailsScreen(app, top.model)
                             is Screen.Player -> PlayerScreen(app, top.req)
+                            is Screen.Profiles -> ProfileScreen(app, top)
+                            is Screen.Diag -> DiagScreen(app)
                         }
                     }
                 }
 
                 app.dialog?.let { spec -> key(spec) { DialogView(app, spec) } }
+                app.pin?.let { spec -> key(spec) { PinDialog(app, spec) } }
             }
         }
     }

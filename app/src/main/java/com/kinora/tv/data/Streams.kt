@@ -47,13 +47,20 @@ object Streams {
                         val su = sb.str("url")
                         if (su.isNotEmpty()) subs.add(SubTrack(su, sb.str("lang"), a.name))
                     }
-                    found.add(StreamOption(url, label, headers(s), false, a.name, a.url, subs))
+                    found.add(StreamOption(url, label, headers(s), false, a.name, a.url, subs, streamQuality("$label $nm")))
                 } else {
                     unsupported++
                 }
             }
         }
         StreamResult(found, unsupported)
+    }
+
+    /** Qualidade preferida: as fontes mais proximas dela vem primeiro (ex.: 1080 -> 1080, 720, 480, 4K). */
+    fun sortByQuality(list: List<StreamOption>, pref: String): List<StreamOption> {
+        if (pref == "auto") return list
+        val target = pref.toIntOrNull() ?: return list
+        return list.sortedBy { if (it.quality > 0) kotlin.math.abs(it.quality - target) else 2000 }
     }
 
     /** Legendas dos addons com o recurso "subtitles" (no maximo 60, espera ate 6 s). */

@@ -43,6 +43,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.painterResource
+import com.kinora.tv.R
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
@@ -316,5 +328,123 @@ fun Chip(
         contentAlignment = Alignment.Center,
     ) {
         KText(text, fontSize, weight = W.Medium, color = K.Text, maxLines = 1, align = TextAlign.Center)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v1.5: vidro, luz ambiente, botoes em pilula, selos, indicador de carregamento
+// ---------------------------------------------------------------------------
+
+/** Cartao de vidro (card.9 do Roku): fundo escuro translucido com borda clara fina. */
+@Composable
+fun Modifier.glassCard(radius: Int = 18, highlighted: Boolean = false): Modifier {
+    val shape = RoundedCornerShape(d(radius))
+    return this
+        .clip(shape)
+        .background(if (highlighted) Color(0xF528283A) else Color(0xEB1A1A20))
+        .border(d(2), if (highlighted) Color(0x5AFFFFFF) else Color(0x26FFFFFF), shape)
+}
+
+/** Brilho colorido (luz ambiente) que muda com o titulo/perfil. */
+@Composable
+fun AccentGlow(color: Long, x: Int, y: Int, w: Int, h: Int, alpha: Float) {
+    val c = Color(color)
+    Box(
+        Modifier.at(x, y).box(w, h).background(
+            Brush.radialGradient(
+                0.0f to c.copy(alpha = 0.40f * alpha / 0.5f),
+                0.45f to c.copy(alpha = 0.18f * alpha / 0.5f),
+                1.0f to c.copy(alpha = 0f),
+            )
+        )
+    )
+}
+
+/** Selo arredondado (tipo, IMDb, classificacao). */
+@Composable
+fun Badge(text: String, bg: Color, fg: Color, height: Int = 38, size: Int = 20) {
+    Box(
+        Modifier.height(d(height)).clip(RoundedCornerShape(d(10))).background(bg).padding(horizontal = d(15)),
+        contentAlignment = Alignment.Center,
+    ) {
+        KText(text, size, weight = W.Bold, color = fg)
+    }
+}
+
+/** Indicador de carregamento girando (spinner.png do Roku). */
+@Composable
+fun Spinner(x: Int, y: Int, size: Int = 96) {
+    val tr = rememberInfiniteTransition(label = "spin")
+    val angle by tr.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 1000, easing = LinearEasing)),
+        label = "angle",
+    )
+    Image(
+        painter = painterResource(R.drawable.spinner),
+        contentDescription = null,
+        modifier = Modifier.at(x, y).box(size, size).rotate(angle),
+    )
+}
+
+/**
+ * Botao em pilula com icone (HeroButton 320x72 do banner e PillButton 290x64 da ficha):
+ * vidro com texto branco em repouso; branco com texto escuro em foco.
+ */
+@Composable
+fun IconPill(
+    text: String,
+    icon: Int,
+    iconDark: Int,
+    w: Int,
+    h: Int,
+    modifier: Modifier = Modifier,
+    iconSize: Int = 34,
+    fontSize: Int = 26,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(d(h / 2))
+    Box(
+        modifier
+            .box(w, h)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocus()
+            }
+            .focusable()
+            .tvClick(null, onClick)
+            .clip(shape)
+            .background(if (focused) K.White else Color(0x46FFFFFF))
+            .border(d(2), if (focused) K.White else Color(0xB3FFFFFF), shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                painter = painterResource(if (focused) iconDark else icon),
+                contentDescription = null,
+                modifier = Modifier.box(iconSize, iconSize),
+            )
+            Box(Modifier.width(d(14)))
+            KText(text, fontSize, weight = W.Bold, color = if (focused) K.Bg else K.White)
+        }
+    }
+}
+
+/** Botao com icone em cima e rotulo embaixo (botoes do player e acoes dos addons). */
+@Composable
+fun IconButtonTile(label: String, icon: Int, w: Int, h: Int, focused: Boolean, modifier: Modifier = Modifier) {
+    Box(
+        modifier.box(w, h).clip(RoundedCornerShape(d(14)))
+            .background(if (focused) Color(0x4DFFFFFF) else Color.Transparent)
+    ) {
+        Image(
+            painter = painterResource(icon),
+            contentDescription = null,
+            modifier = Modifier.at((w - 56) / 2, 12).box(56, 56),
+        )
+        KLabel(label, 0, 76, w, 30, 17, weight = W.Medium, color = Color(0xFFE6E6EE), align = TextAlign.Center)
     }
 }

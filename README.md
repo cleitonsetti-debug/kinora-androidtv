@@ -28,51 +28,75 @@ https://github.com/cleitonsetti-debug/kinora-androidtv/releases/latest/download/
 
 O Kinora aparece na fileira de apps da tela inicial. Também funciona em celular ou tablet na horizontal.
 
-> **Atualizando da versão 1.2.x:** desinstale o app antigo antes de instalar a 1.3.0 (a chave de assinatura mudou).
+> **Atualizando da versão 1.2.x:** desinstale o app antigo antes (a chave de assinatura mudou).
 > A partir da 1.3.0, as versões novas instalam por cima, sem desinstalar.
+
+### Atualização pelo próprio app
+Ao abrir, o Kinora consulta as releases do GitHub e avisa uma vez quando há versão nova, com o botão
+**Baixar e instalar**: o app baixa o APK e abre o instalador do Android (você confirma na tela). Também dá para
+verificar em **Ajustes > Sobre e ajuda > Verificar atualização**. Na primeira vez, o Android pede para permitir que o
+Kinora instale apps (fontes desconhecidas).
 
 ## O que o app faz
 
-- **Início, Filmes e Séries** com linhas de catálogo dos addons ativos e "Continuar assistindo" com barra de progresso.
-- **Destaques:** o banner gira sozinho (com fade) entre títulos em destaque, com o botão **Detalhes**;
-  ao entrar nas linhas, ele acompanha o poster em foco. A tela inicial tem linhas extras de filmes por gênero.
+- **Perfis ("Quem está assistindo?")**: até 6 perfis, cada um com histórico, Minha lista, episódios assistidos,
+  pesquisas recentes, legenda/áudio lembrados e ajustes próprios (addons e PIN são compartilhados). **Perfil infantil**:
+  conteúdo adulto sempre oculto e Ajustes/Addons bloqueados. O perfil ativo aparece no fim da barra do topo.
+- **Início, Filmes e Séries** com linhas de catálogo, "Continuar assistindo" com barra de progresso, **Minha lista** e
+  linhas de filmes por gênero. Catálogos guardados em memória por 5 minutos.
+- **Banner de destaques**: gira sozinho com fade, **luz ambiente** colorida que muda com cada título, **zoom lento**
+  opcional, selos (tipo, IMDb) e os botões **Detalhes** e **Assistir/Continuar** (abre a ficha e já toca, preferindo a
+  mesma fonte de antes). O que você estava assistindo vai primeiro.
 - **Filtros** de catálogo e de gênero/ano em Filmes e Séries.
-- **Busca** com teclado próprio na tela (um teclado físico ou USB também digita).
-- **Detalhes:** sinopse, nota do IMDb, classificação indicativa (quando o addon fornece), temporadas e episódios.
-- **Escolha da fonte de vídeo** entre os addons com o recurso `stream`, sempre com um vídeo de teste no fim da lista.
-- **Player próprio:**
-  - controles com ícones (-10 s, pausar, +10 s, ir para, legendas, áudio, próximo episódio e detalhes da fonte);
-  - barra de tempo com passos que aceleram (10 a 120 s);
-  - ficha de abertura com título, IMDb, classificação, ano e gêneros por 7 s;
-  - legendas do stream e de addons com o recurso `subtitles`, troca de faixa de áudio;
-  - próximo episódio automático, com cartão de contagem perto do fim.
-- **Addons:** adicionar por URL (aceita `stremio://`), ativar/desativar, remover e ver os detalhes de cada um.
-- **Ajustes** em português, inglês ou espanhol: retomar de onde parou, escolher a fonte automaticamente,
-  idioma preferido da legenda e do áudio, próximo episódio automático, ficha ao iniciar, limpar o histórico e
-  restaurar os addons padrão.
+- **Busca** com teclado próprio e **pesquisas recentes**.
+- **Ficha do título**: sinopse, elenco, direção, duração, IMDb, classificação indicativa (quando o addon fornece),
+  botões Assistir e **Minha lista**, temporadas e episódios com barra de assistido/em andamento.
+- **Fontes** dos addons, ordenadas pela **qualidade preferida**, com um vídeo de teste no fim da lista.
+- **Player no estilo Netflix/YouTube**: Esquerda/Direita pulam na hora mostrando só a barra vermelha; OK pausa
+  mostrando só a barra; Baixo abre os controles completos; **troca automática de fonte** se o vídeo falhar ou demorar
+  mais de 30 s; legenda e áudio **lembrados por título**; ficha de abertura; próximo episódio automático.
+- **Addons** em cartões com ícone e status, painel de detalhes e botões **Ativar/Desativar, Atualizar, Configurar e
+  Remover**; no topo, **Adicionar addon** e **Atualizar todos**.
+- **Ajustes em 7 categorias**: Geral, Reprodução, Legendas e áudio, Segurança e conteúdo (ocultar adulto, **PIN**),
+  Perfis, Dados (limpar histórico, lista, pesquisas, assistidos; restaurar addons e ajustes) e Sobre e ajuda
+  (atualização, **diagnóstico e autoteste**, atalhos do controle).
+
+## Adicionar addon por link
+
+O Kinora abre links `stremio://...` e `kinora://add?addon=<url>`, então dá para adicionar um addon a partir de outro
+app da TV. Pelo computador (com o ADB conectado à TV):
+
+```
+sh tools/add-addon.sh https://endereco-do-addon/manifest.json
+```
+
+A TV pede confirmação antes de adicionar. Com um PIN ativo, a adição por link fica bloqueada.
 
 ## Controle remoto
 
 | Onde | Tecla | O que faz |
 |---|---|---|
 | Telas | Setas / OK / Voltar | Navegar, abrir, voltar |
-| Tela inicial | Play | Abre o destaque do banner |
+| Tela inicial | Play | Abre e toca o destaque do banner |
 | Busca | Retroceder / Avançar | Apagar / espaço |
 | Busca | Play | Ir para os resultados |
+| Perfis | Menu ou segurar OK | Menu do perfil (entrar, renomear, infantil, excluir) |
 | Addons | Menu ou segurar OK | Remover o addon |
-| Player (sem controles) | OK | Pausar / continuar |
-| Player (sem controles) | Baixo, Cima ou Menu | Mostrar os controles |
-| Player (sem controles) | Esquerda / Direita | Abrir a barra de tempo e mover |
-| Player (com controles) | Esquerda / Direita, OK | Escolher e usar um botão |
-| Player (com controles) | Cima | Barra de tempo |
-| Barra de tempo | OK / Voltar | Confirmar / cancelar (parado por 3 s, confirma sozinho) |
+| Player | Esquerda / Direita | Pula na hora (10, 15 ou 30 s; acelera se repetir) |
+| Player | OK | Pausar / continuar (com a barra na tela) |
+| Player | Baixo | Controles completos |
+| Player (controles) | Cima | Ir para um ponto da barra (confirma com OK) |
 | Player | Play, Retroceder, Avançar | Pausar, -30 s, +30 s |
+| Player | Voltar | Fecha os controles ou sai |
 
 ## Diferenças em relação ao Roku
 
 - O player usa o **Media3 / ExoPlayer**: toca MP4, MKV, HLS (`.m3u8`) e DASH (`.mpd`), com os cabeçalhos HTTP
   do addon (`behaviorHints.proxyHeaders`). Legendas externas em SRT, VTT ou SSA.
-- O `*` do controle Roku virou **Menu** ou **segurar OK** na tela de Addons.
+- O `*` do controle Roku virou **Menu** ou **segurar OK** (Addons e Perfis).
+- O PIN é digitado num teclado numérico do próprio app (as teclas numéricas do controle também funcionam).
+- A atualização é feita pelo próprio app (no Roku é um script no computador), e o "adicionar addon pela rede" do Roku
+  virou o link `kinora://add` (veja acima).
 - Os dados (addons, ajustes, histórico) ficam no armazenamento do app; não são copiados do Roku.
 - O layout usa as mesmas coordenadas do Roku (1920x1080) e é escalado para qualquer resolução de TV.
 
@@ -86,10 +110,10 @@ Todo `git push` na branch `main` roda o workflow **Gerar APK**. O APK fica em **
 2. Faça o commit e envie:
    ```
    git push
-   git tag v1.3.1
-   git push origin v1.3.1
+   git tag v1.5.3
+   git push origin v1.5.3
    ```
-3. O Actions cria a Release `v1.3.1` com o `Kinora-AndroidTV.apk` anexado.
+3. O Actions cria a Release `v1.5.3` com o `Kinora-AndroidTV.apk` anexado.
 
 ### No computador
 Com JDK 17 e Android SDK (ou pelo Android Studio):
@@ -107,15 +131,21 @@ Para publicar na Play Store, use uma chave própria e guarde-a fora do repositó
 app/src/main/java/com/kinora/tv/
   MainActivity.kt
   data/   I18n (pt/en/es), AddonStore (protocolo Stremio), Streams (fontes e legendas),
-          Net, Store (persistência), Models, Util
+          Net (e log de erros), Store (persistência por perfil), SelfTest (autoteste), Models, Util
   ui/     App e AppState (pilha de telas), Theme (cores, Poppins, escala), Common (poster, pílulas, chips, foco)
-          HomeScreen, SearchScreen, DetailsScreen, PlayerScreen, AddonsScreen, SettingsScreen, DialogView
+          HomeScreen, SearchScreen, DetailsScreen, PlayerScreen, AddonsScreen, SettingsScreen,
+          ProfileScreen, DiagScreen, DialogView (diálogos e PIN), Updater (atualização pelo app)
 app/src/main/res/     fonte Poppins, ícones do player, banner da TV
 .github/workflows/    build-apk.yml (gera o APK e publica as Releases)
+tools/                add-addon.sh (adicionar addon pela TV via ADB)
 ```
 
 ## Versões
 
+- **1.5.2** – Igual ao Kinora Roku 1.5.2: perfis (com infantil e PIN), luz ambiente, zoom e destaques com
+  Assistir/Continuar, Minha lista, episódios assistidos, pesquisas recentes, elenco/direção/duração, player no estilo
+  Netflix/YouTube com troca automática de fonte e qualidade preferida, legenda/áudio lembrados por título, addons em
+  cartões com atualizar/configurar, ajustes em categorias, diagnóstico e autoteste, aviso e atualização pelo app.
 - **1.3.0** – Player próprio com barra de tempo, ficha de abertura, legendas e áudio, próximo episódio automático;
   destaques na tela inicial e linhas por gênero; detalhes dos addons; novos ajustes; sinopse buscada sob demanda;
   chave de assinatura fixa.

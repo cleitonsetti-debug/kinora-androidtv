@@ -117,3 +117,99 @@ fun formatTime(totalSec: Int): String {
     val sc = t % 60
     return if (h > 0) "$h:${pad2(mi)}:${pad2(sc)}" else "$mi:${pad2(sc)}"
 }
+
+// ---------------------------------------------------------------------------
+// Qualidade, conteudo adulto, PIN, preferencias de faixa
+// ---------------------------------------------------------------------------
+fun streamQuality(text: String): Int {
+    val t = text.lowercase()
+    return when {
+        "2160" in t || "4k" in t || "uhd" in t -> 2160
+        "1080" in t -> 1080
+        "720" in t -> 720
+        "480" in t -> 480
+        "360" in t -> 360
+        else -> 0
+    }
+}
+
+fun isAdultMeta(meta: JSONObject): Boolean =
+    meta.optJSONArray("genres").strings().any { val g = it.lowercase(); g == "adult" || g == "erotic" || g == "erotica" }
+
+fun filterAdultGenres(list: List<String>): List<String> = list.filter { it.lowercase() != "adult" }
+
+/** SHA-256 de "kinora:" + PIN, em hexadecimal (igual ao app Roku). */
+fun pinHash(pin: String): String {
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    val bytes = md.digest(("kinora:" + pin).toByteArray(Charsets.UTF_8))
+    return bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+}
+
+/** "pob" -> "pt", "eng" -> "en"; outros idiomas ficam com o codigo original. */
+fun prefCode(lang: String): String = when {
+    langMatches(lang, "pt") -> "pt"
+    langMatches(lang, "en") -> "en"
+    langMatches(lang, "es") -> "es"
+    else -> lang.lowercase()
+}
+
+// ---------------------------------------------------------------------------
+// Cor de destaque (acento): cada titulo/perfil ganha uma cor da paleta
+// ---------------------------------------------------------------------------
+val ACCENTS: LongArray = longArrayOf(
+    0xFFFF4D6D, 0xFFFF7A29, 0xFFFFB703, 0xFF2EC4B6, 0xFF3A86FF, 0xFF8338EC,
+    0xFFFF006E, 0xFF06D6A0, 0xFFEF476F, 0xFF118AB2, 0xFF9B5DE5, 0xFFF15BB5,
+)
+
+fun accentByIndex(i: Int): Long {
+    val n = ACCENTS.size
+    return ACCENTS[((i % n) + n) % n]
+}
+
+fun accentFor(id: String): Long {
+    var total = 0
+    for (c in id) total += c.code
+    return accentByIndex(total)
+}
+
+fun initialOf(name: String): String {
+    val t = name.trim()
+    if (t.isEmpty()) return "?"
+    return t.substring(0, 1).uppercase()
+}
+
+/** true se a versao "a" for maior que "b" (ex.: "1.5.10" > "1.5.2"). */
+fun versionNewer(a: String, b: String): Boolean {
+    val pa = a.split(".")
+    val pb = b.split(".")
+    for (i in 0 until maxOf(pa.size, pb.size)) {
+        val x = toInt(pa.getOrNull(i) ?: "0")
+        val y = toInt(pb.getOrNull(i) ?: "0")
+        if (x > y) return true
+        if (x < y) return false
+    }
+    return false
+}
+
+// ---------------------------------------------------------------------------
+// Registro de falhas de rede (sem expor caminhos de configuracao dos addons)
+// ---------------------------------------------------------------------------
+fun hostOf(url: String): String {
+    var u = url
+    val p = u.indexOf("://")
+    if (p >= 0) u = u.substring(p + 3)
+    val q = u.indexOf('/')
+    if (q >= 0) u = u.substring(0, q)
+    return u
+}
+
+fun netTarget(url: String): String {
+    val res = listOf("/manifest.json", "/catalog/", "/meta/", "/stream/", "/subtitles/").firstOrNull { it in url } ?: ""
+    return hostOf(url) + res
+}
+
+fun formatClock(): String {
+    val c = java.util.Calendar.getInstance()
+    fun p(n: Int) = if (n < 10) "0$n" else n.toString()
+    return p(c.get(java.util.Calendar.HOUR_OF_DAY)) + ":" + p(c.get(java.util.Calendar.MINUTE)) + ":" + p(c.get(java.util.Calendar.SECOND))
+}

@@ -197,4 +197,41 @@ object AddonStore {
         lines.add(t("ad_url") + ": " + a.url)
         return lines.joinToString("\n")
     }
+
+    /** Corpo do painel de detalhes do addon (descricao, tipos, recursos, catalogos, endereco). */
+    fun addonBody(a: Addon, t: Strings): String {
+        val lines = ArrayList<String>()
+        val mf = a.manifest
+        if (a.ok && mf != null) {
+            var d = mf.str("description")
+            if (d.isEmpty()) d = t("ad_nodesc")
+            if (d.length > 260) d = d.take(257) + "..."
+            lines.add(d)
+            lines.add("")
+            val types = joinList(mf.opt("types"), 8)
+            if (types.isNotEmpty()) lines.add(t("ad_types") + ": " + types)
+            val names = ArrayList<String>()
+            val res = mf.optJSONArray("resources")
+            if (res != null) {
+                for (i in 0 until res.length()) {
+                    val r = res.opt(i)
+                    if (r is JSONObject) names.add(r.str("name")) else names.add(asStr(r))
+                }
+            }
+            if (names.isNotEmpty()) lines.add(t("ad_resources") + ": " + names.joinToString(", "))
+            val cats = mf.optJSONArray("catalogs")
+            if (cats != null) lines.add(t("ad_catalogs") + ": " + cats.length())
+        } else {
+            lines.add(t("ad_state_err"))
+        }
+        lines.add(t("ad_url") + ": " + hostOf(a.url))
+        return lines.joinToString("\n")
+    }
+
+    /** Endereco da pagina de configuracao (addons com behaviorHints.configurable). */
+    fun addonConfigUrl(a: Addon): String {
+        if (!a.ok) return ""
+        val bh = a.manifest?.optJSONObject("behaviorHints") ?: return ""
+        return if (bh.optBoolean("configurable", false)) a.url + "/configure" else ""
+    }
 }

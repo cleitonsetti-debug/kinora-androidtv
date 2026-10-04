@@ -18,6 +18,9 @@ data class Info(
     val genres: String = "",
     val addon: String = "",
     val cert: String = "",
+    val runtime: String = "",
+    /** addon da fonte usada da ultima vez (historico) */
+    val src: String = "",
     val videoId: String = "",
     val season: Int = 0,
     val episode: Int = 0,
@@ -38,6 +41,8 @@ data class Info(
         put("genres", genres)
         put("addon", addon)
         put("cert", cert)
+        put("runtime", runtime)
+        put("src", src)
         put("season", season)
         put("episode", episode)
         put("position", position)
@@ -58,6 +63,8 @@ data class Info(
             genres = o.str("genres"),
             addon = o.str("addon"),
             cert = o.str("cert"),
+            runtime = o.str("runtime"),
+            src = o.str("src"),
             videoId = o.str("videoId"),
             season = o.int("season"),
             episode = o.int("episode"),
@@ -106,7 +113,11 @@ data class StreamOption(
     val addonName: String = "",
     val addonUrl: String = "",
     val subs: List<SubTrack> = emptyList(),
+    val quality: Int = 0,
 )
+
+/** Perfil ("Quem esta assistindo?"). */
+data class Profile(val id: String, val name: String, val color: Int, val kids: Boolean)
 
 /** Episodio na lista de reproducao (ordem temporada/episodio, sem especiais). */
 data class PlaylistItem(val id: String, val season: Int, val episode: Int, val title: String)
@@ -128,4 +139,7 @@ data class PlayRequest(
     val playlist: List<PlaylistItem> = emptyList(),
     val source: SourceInfo? = null,
     val subs: List<SubTrack> = emptyList(),
+    /** outras fontes reais da lista: o player tenta a proxima se esta falhar */
+    val alts: List<StreamOption> = emptyList(),
+    val altIdx: Int = -1,
 )

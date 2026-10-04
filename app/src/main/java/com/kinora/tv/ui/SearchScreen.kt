@@ -36,6 +36,7 @@ import com.kinora.tv.data.Info
 import com.kinora.tv.data.Net
 import com.kinora.tv.data.objects
 import com.kinora.tv.data.urlEncode
+import com.kinora.tv.data.isAdultMeta
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -63,6 +64,22 @@ class SearchModel {
     val gridState = LazyGridState()
     val gridReq = FocusRequester()
     val kbReq = FocusRequester()
+    val recentReq = FocusRequester()
+    var recents by mutableStateOf<List<String>>(emptyList())
+    var recentIdx by mutableIntStateOf(0)
+
+    /** Pesquisas recentes aparecem enquanto nao ha texto nem resultados. */
+    fun showRecents(): Boolean = recents.isNotEmpty() && query.isEmpty() && results.isEmpty()
+
+    fun pickRecent(app: AppState, q: String) {
+        query = q
+        goKeyboard()
+        debounceJob?.cancel()
+        debounceJob = app.scope.launch {
+            delay(300)
+            runSearch(app)
+        }
+    }
     var focusCmd by mutableIntStateOf(0)
     var debounceJob: Job? = null
     var searchJob: Job? = null
@@ -118,7 +135,7 @@ class SearchModel {
         if (focusArea == "grid") goKeyboard()
     }
 
-    private fun runSearch(app: AppState) {
+    fun runSearch(app: AppState) {
         val t = app.t
         val q = query.trim()
         searchJob?.cancel()
@@ -146,6 +163,7 @@ class SearchModel {
                 if (!r.ok) continue
                 for (meta in r.data?.optJSONArray("metas").objects()) {
                     if (out.size >= 40) break
+                    if (app.hideAdult && isAdultMeta(meta)) continue
                     val info = Info.fromMeta(meta, catalogs[i].base, catalogs[i].kind)
                     if (info.id.isNotEmpty() && info.name.isNotEmpty() && seen.add(info.id)) out.add(info)
                 }
@@ -174,8 +192,12 @@ fun SearchScreen(app: AppState, m: SearchModel) {
         if (m.status.isEmpty() && m.results.isEmpty()) m.status = t("search_hint_min")
     }
 
+    LaunchedEffect(app.focusTick) { m.recents = app.store.loadSearches() }
+
     LaunchedEffect(m.focusCmd, app.focusTick) {
-        if (m.focusArea == "grid" && m.results.isNotEmpty()) {
+        if (m.focusArea == "recent" && m.showRecents()) {
+            m.recentReq.focusSoon()
+        } else if (m.focusArea == "grid" && m.results.isNotEmpty()) {
             val visible = m.gridState.layoutInfo.visibleItemsInfo.any { it.index == m.gridFocused }
             if (!visible) m.gridState.scrollToItem(m.gridFocused)
             m.gridReq.focusSoon()
@@ -185,7 +207,7 @@ fun SearchScreen(app: AppState, m: SearchModel) {
         }
     }
 
-    BackHandler(enabled = m.focusArea == "grid") { m.goKeyboard() }
+    BackHandler(enabled = m.focusArea == "grid" || m.focusArea == "recent") { m.goKeyboard() }
 
     Box(Modifier.fillMaxSize().background(K.Bg)) {
         KLabel(t("search_title"), 80, 40, 800, 70, 42, weight = W.Bold, color = K.White)
@@ -216,7 +238,14 @@ fun SearchScreen(app: AppState, m: SearchModel) {
                             true
                         }
                         Key.DirectionRight -> {
-                            if (m.curCol < m.cols - 1) m.curCol += 1 else m.goResults()
+                            if (m.curCol < m.cols - 1) {
+                                m.curCol += 1
+                            } else if (m.showRecents()) {
+                                m.focusArea = "recent"
+                                m.focusCmd += 1
+                            } else {
+                                m.goResults()
+                            }
                             true
                         }
                         Key.DirectionUp -> {
@@ -320,13 +349,46 @@ fun SearchScreen(app: AppState, m: SearchModel) {
                             m.gridFocused = idx
                             m.focusArea = "grid"
                         },
-                        onClick = { app.openDetails(info) },
+                        onClick = {
+                            app.store.addSearch(m.query.trim())
+                            app.openDetails(info)
+                        },
                     )
                 }
             }
         }
 
-        if (m.results.isEmpty() && m.status.isNotEmpty()) {
+        // Pesquisas recentes
+        if (m.showRecents()) {
+            KLabel(t("recent_searches"), 700, 150, 900, 40, 26, weight = W.Bold, color = K.Meta)
+            m.recents.take(8).forEachIndexed { i, q ->
+                ListPill(
+                    text = q,
+                    w = 760,
+                    h = 60,
+                    modifier = Modifier.at(700, 204 + i * 64)
+                        .then(if (i == m.recentIdx) Modifier.focusRequester(m.recentReq) else Modifier)
+                        .onPreviewKeyEvent { e ->
+                            if (!e.isDown()) return@onPreviewKeyEvent false
+                            when {
+                                e.key == Key.DirectionLeft -> {
+                                    m.goKeyboard()
+                                    true
+                                }
+                                e.key == Key.DirectionRight -> true
+                                e.key == Key.DirectionUp && i == 0 -> true
+                                e.key == Key.DirectionDown && i == minOf(m.recents.size, 8) - 1 -> true
+                                else -> false
+                            }
+                        },
+                    onFocus = {
+                        m.recentIdx = i
+                        m.focusArea = "recent"
+                    },
+                    onClick = { m.pickRecent(app, q) },
+                )
+            }
+        } else if (m.results.isEmpty() && m.status.isNotEmpty()) {
             KLabel(m.status, 700, 420, 1100, 140, 28, weight = W.Medium, color = K.Meta, maxLines = 3, align = TextAlign.Center)
         }
     }

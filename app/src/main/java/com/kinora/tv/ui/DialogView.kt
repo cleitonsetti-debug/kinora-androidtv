@@ -33,6 +33,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -151,6 +155,96 @@ fun DialogView(app: AppState, spec: DialogSpec) {
                         },
                         onClick = { press(i) },
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Teclado de PIN (4 digitos), igual em todos os aparelhos: setas escolhem a tecla,
+ * OK digita; as teclas numericas do controle tambem funcionam.
+ */
+@Composable
+fun PinDialog(app: AppState, spec: PinSpec) {
+    var typed by remember(spec) { mutableStateOf("") }
+    var idx by remember(spec) { mutableStateOf(0) }
+    val req = remember(spec) { FocusRequester() }
+    val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK")
+
+    fun finish() {
+        if (typed.length < 4) return
+        val value = typed
+        app.closePin()
+        spec.onPin(value)
+    }
+
+    fun press(k: String) {
+        when (k) {
+            "⌫" -> if (typed.isNotEmpty()) typed = typed.dropLast(1)
+            "OK" -> finish()
+            else -> if (typed.length < 4) {
+                typed += k
+                if (typed.length == 4) idx = 11
+            }
+        }
+    }
+
+    BackHandler { app.closePin() }
+    LaunchedEffect(spec) { req.focusSoon() }
+
+    Box(Modifier.fillMaxSize().background(K.Scrim), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier
+                .width(d(620))
+                .clip(RoundedCornerShape(d(24)))
+                .background(K.Panel)
+                .padding(horizontal = d(56), vertical = d(44))
+                .focusRequester(req)
+                .focusable()
+                .onKeyEvent { e ->
+                    if (!e.isDown()) return@onKeyEvent e.isSelect()
+                    when (e.key) {
+                        Key.DirectionLeft -> if (idx % 3 > 0) idx--
+                        Key.DirectionRight -> if (idx % 3 < 2) idx++
+                        Key.DirectionUp -> if (idx >= 3) idx -= 3
+                        Key.DirectionDown -> if (idx < 9) idx += 3
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> if (e.repeatCount() == 0) press(keys[idx])
+                        Key.Backspace, Key.Delete -> press("⌫")
+                        else -> {
+                            val cp = e.utf16CodePoint
+                            if (cp in '0'.code..'9'.code) press(cp.toChar().toString()) else return@onKeyEvent false
+                        }
+                    }
+                    true
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(d(22)),
+        ) {
+            KText(spec.title, 32, weight = W.Bold, color = K.White, align = TextAlign.Center)
+            Row(horizontalArrangement = Arrangement.spacedBy(d(22))) {
+                for (i in 0 until 4) {
+                    Box(
+                        Modifier.box(26, 26).clip(RoundedCornerShape(d(13)))
+                            .background(if (i < typed.length) K.White else Color(0x40FFFFFF))
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(d(12))) {
+                for (r in 0 until 4) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(d(12))) {
+                        for (c in 0 until 3) {
+                            val i = r * 3 + c
+                            val sel = i == idx
+                            Box(
+                                Modifier.box(150, 76).clip(RoundedCornerShape(d(14)))
+                                    .background(if (sel) K.White else K.Surface),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                KText(keys[i], 30, weight = W.Bold, color = if (sel) K.Bg else K.White, align = TextAlign.Center)
+                            }
+                        }
+                    }
                 }
             }
         }

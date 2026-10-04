@@ -12,8 +12,8 @@ android {
         applicationId = "com.kinora.tv"
         minSdk = 21
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.3.0-tv"
+        versionCode = 4
+        versionName = "1.5.2"
     }
 
     // Chave fixa do projeto (so para instalar na TV por fora da loja): assim cada APK novo
