@@ -14,6 +14,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.kinora.tv.data.TorrentEngine.init(applicationContext)
         val state = AppState(applicationContext, Store(applicationContext), lifecycleScope)
         app = state
         state.loadAddons()

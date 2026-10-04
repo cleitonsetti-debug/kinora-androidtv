@@ -76,6 +76,7 @@ import com.kinora.tv.data.langName
 import com.kinora.tv.data.toLang2
 import com.kinora.tv.data.prefCode
 import com.kinora.tv.data.StreamOption
+import com.kinora.tv.data.TorrentEngine
 import androidx.compose.ui.graphics.Brush
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -160,6 +161,8 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
 
     var switching = false
     var done = false
+    /** fonte atual e P2P (infoHash) */
+    var p2p = false
     private var finished = false
     private var introShown = false
     private var hintShown = false
@@ -208,8 +211,31 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         prepareJob?.cancel()
         prepareJob = app.scope.launch {
             val addonSubs = Streams.fetchSubs(app.addons, info.kind, videoId)
+            var playUrl = url
+            var playFormat = format
+            p2p = TorrentEngine.isTorrent(url)
+            if (p2p) {
+                // fonte P2P (infoHash): o motor baixa o video e entrega um endereco local
+                val prep = try {
+                    TorrentEngine.prepare(url, t) { s -> loadingText = s }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (done) return@launch
+                    if (tryNextSource()) return@launch
+                    loadingText = ""
+                    closePlayer()
+                    val msg = if (e is TorrentEngine.P2PException) e.message ?: "" else t("p2p_nometa") + " (" + e.javaClass.simpleName + ")"
+                    app.showMessage(t("play_error_title"), msg)
+                    return@launch
+                }
+                playUrl = prep.url
+                playFormat = prep.format
+            } else {
+                TorrentEngine.stop()
+            }
             loadingText = ""
-            startPlayback(addonSubs)
+            startPlayback(addonSubs, playUrl, playFormat)
         }
     }
 
@@ -241,12 +267,12 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         }
     }
 
-    private fun startPlayback(addonSubs: List<SubTrack>) {
+    private fun startPlayback(addonSubs: List<SubTrack>, playUrl: String, playFormat: String) {
         val builder = MediaItem.Builder()
-            .setUri(url)
+            .setUri(playUrl)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(displayTitle()).build())
             .setSubtitleConfigurations(buildSubConfigs(addonSubs))
-        when (format) {
+        when (playFormat) {
             "hls" -> builder.setMimeType(MimeTypes.APPLICATION_M3U8)
             "dash" -> builder.setMimeType(MimeTypes.APPLICATION_MPD)
             "mkv" -> builder.setMimeType(MimeTypes.VIDEO_MATROSKA)
@@ -277,10 +303,10 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         mini = false
         hideControls()
 
-        // demorou demais para comecar: tenta a proxima fonte
+        // demorou demais para comecar: tenta a proxima fonte (P2P tem mais tempo)
         bufferJob?.cancel()
         bufferJob = app.scope.launch {
-            delay(30000)
+            delay(if (p2p) 120000 else 30000)
             if (player.isPlaying || paused || switching || done) return@launch
             if (tryNextSource()) return@launch
             closePlayer()
@@ -339,7 +365,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
     }
 
     fun onBuffering() {
-        if (!switching) loadingText = t("loading")
+        if (!switching) loadingText = (if (p2p) TorrentEngine.statusLine(t) else null) ?: t("loading")
     }
 
     fun onEnded() {
@@ -369,6 +395,9 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         val d = player.duration
         dur = if (d > 0) d / 1000f else 0f
         pos = player.currentPosition / 1000f
+        if (p2p && !switching && player.playbackState == Player.STATE_BUFFERING) {
+            TorrentEngine.statusLine(t)?.let { loadingText = it }
+        }
         if (panelOpen || switching || ctrlVisible || scrubbing || mini) return
         if (nextEp == null) return
         val st = player.playbackState
@@ -628,7 +657,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         loadingText = t("player_loading_next")
         prepareJob?.cancel()
         prepareJob = app.scope.launch {
-            val res = Streams.fetch(app.addons, info.kind, nxt.id)
+            val res = Streams.fetch(app.addons, info.kind, nxt.id, app.settings.p2p)
             val found = Streams.sortByQuality(res.found, app.settings.quality)
             // prefere a mesma fonte (addon) do episodio anterior
             var si = found.indexOfFirst { it.addonUrl == preferAddonUrl }
@@ -800,6 +829,7 @@ private class PlayerModel(val app: AppState, request: PlayRequest, val player: E
         prepareJob?.cancel()
         bufferJob?.cancel()
         player.stop()
+        TorrentEngine.stop()
         if (app.stack.lastOrNull() is Screen.Player) app.pop()
     }
 
@@ -965,6 +995,7 @@ fun PlayerScreen(app: AppState, req: PlayRequest) {
             lifecycleOwner.lifecycle.removeObserver(observer)
             player.removeListener(listener)
             player.release()
+            TorrentEngine.stop()
         }
     }
 

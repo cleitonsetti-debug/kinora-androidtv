@@ -5,7 +5,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import org.json.JSONObject
 
-/** Resultado da busca de fontes: fontes diretas (http/https) e quantas foram ignoradas. */
+/** Resultado da busca de fontes: diretas (http/https) e P2P (infoHash), e quantas foram ignoradas. */
 class StreamResult(val found: List<StreamOption>, val unsupported: Int)
 
 /**
@@ -22,7 +22,18 @@ object Streams {
         return out
     }
 
-    suspend fun fetch(addons: List<Addon>, kind: String, videoId: String): StreamResult = coroutineScope {
+    /** Trackers informados pelo addon em "sources" ("tracker:udp://..."). */
+    private fun trackers(s: JSONObject): List<String> {
+        val arr = s.optJSONArray("sources") ?: return emptyList()
+        val out = ArrayList<String>()
+        for (i in 0 until arr.length()) {
+            val v = arr.opt(i) as? String ?: continue
+            if (v.startsWith("tracker:")) out.add(v.removePrefix("tracker:"))
+        }
+        return out
+    }
+
+    suspend fun fetch(addons: List<Addon>, kind: String, videoId: String, p2p: Boolean = true): StreamResult = coroutineScope {
         val sources = addons.filter { AddonStore.supportsResource(it, "stream", kind, videoId) }
         val results = sources.map { a ->
             async { Pair(a, Net.getJson(a.url + "/stream/" + urlEncode(kind) + "/" + urlEncode(videoId) + ".json")) }
@@ -33,12 +44,15 @@ object Streams {
             if (!res.ok) continue
             for (s in res.data?.optJSONArray("streams").objects()) {
                 val url = s.str("url")
-                if (url.isNotEmpty() && url.lowercase().startsWith("http")) {
+                val hash = s.str("infoHash").lowercase()
+                val isP2p = p2p && url.isEmpty() && Regex("^[0-9a-f]{40}$").matches(hash)
+                if ((url.isNotEmpty() && url.lowercase().startsWith("http")) || isP2p) {
                     val nm = s.str("name").replace("\n", " ")
                     var tt = s.str("title")
                     if (tt.isEmpty()) tt = s.str("description")
                     tt = tt.replace("\n", " | ")
                     var label = "[${a.name}] "
+                    if (isP2p) label += "P2P  "
                     if (nm.isNotEmpty()) label += "$nm  "
                     label += tt
                     if (label.length > 120) label = label.take(117) + "..."
@@ -47,13 +61,16 @@ object Streams {
                         val su = sb.str("url")
                         if (su.isNotEmpty()) subs.add(SubTrack(su, sb.str("lang"), a.name))
                     }
-                    found.add(StreamOption(url, label, headers(s), false, a.name, a.url, subs, streamQuality("$label $nm")))
+                    val playUrl = if (isP2p) TorrentEngine.buildUrl(hash, (s.opt("fileIdx") as? Number)?.toInt() ?: -1, trackers(s)) else url
+                    found.add(StreamOption(playUrl, label, headers(s), false, a.name, a.url, subs, streamQuality("$label $nm")))
                 } else {
                     unsupported++
                 }
             }
         }
-        StreamResult(found, unsupported)
+        // diretas primeiro (comecam mais rapido); P2P depois, na mesma ordem dos addons
+        val direct = found.filter { !TorrentEngine.isTorrent(it.url) }
+        StreamResult(direct + found.filter { TorrentEngine.isTorrent(it.url) }, unsupported)
     }
 
     /** Qualidade preferida: as fontes mais proximas dela vem primeiro (ex.: 1080 -> 1080, 720, 480, 4K). */

@@ -22,6 +22,7 @@ data class Settings(
     val zoom: Boolean = false,
     val ambient: Boolean = true,
     val carousel: Boolean = true,
+    val p2p: Boolean = true,          // fontes P2P (infoHash)
 )
 
 /**
@@ -94,6 +95,7 @@ class Store(context: Context) {
             zoom = o.optBoolean("zoomV2", d.zoom),
             ambient = o.optBoolean("ambient", d.ambient),
             carousel = o.optBoolean("carousel", d.carousel),
+            p2p = o.optBoolean("p2p", d.p2p),
         )
     }
 
@@ -104,6 +106,7 @@ class Store(context: Context) {
             .put("autoNext", s.autoNext).put("intro", s.intro)
             .put("quality", s.quality).put("hideAdult", s.hideAdult).put("jump", s.jump)
             .put("zoomV2", s.zoom).put("ambient", s.ambient).put("carousel", s.carousel)
+            .put("p2p", s.p2p)
         writeRaw("settings", o.toString())
     }
 

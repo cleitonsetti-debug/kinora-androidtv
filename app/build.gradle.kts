@@ -12,8 +12,8 @@ android {
         applicationId = "com.kinora.tv"
         minSdk = 21
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.5.2"
+        versionCode = 5
+        versionName = "1.5.3"
     }
 
     // Chave fixa do projeto (so para instalar na TV por fora da loja): assim cada APK novo
@@ -73,4 +73,11 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-exoplayer-dash:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+
+    // Motor P2P (fontes com infoHash): libtorrent4j + bibliotecas nativas das TVs (ARM) e emuladores (x86_64)
+    val lt4j = "2.1.0-39"
+    implementation("org.libtorrent4j:libtorrent4j:$lt4j")
+    implementation("org.libtorrent4j:libtorrent4j-android-arm64:$lt4j")
+    implementation("org.libtorrent4j:libtorrent4j-android-arm:$lt4j")
+    implementation("org.libtorrent4j:libtorrent4j-android-x86_64:$lt4j")
 }

@@ -27,7 +27,7 @@ object NetLog {
 }
 
 object Net {
-    const val UA = "KinoraAndroidTV/1.5"
+    const val UA = "KinoraAndroidTV/1.5.3"
 
     suspend fun getJson(url: String, timeoutMs: Int = 15000): JsonResult = withContext(Dispatchers.IO) {
         val r = fetch(url, timeoutMs)

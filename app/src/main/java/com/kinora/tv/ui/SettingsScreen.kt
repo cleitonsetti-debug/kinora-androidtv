@@ -67,7 +67,7 @@ fun SettingsScreen(app: AppState, screen: Screen.SettingsScreen) {
 
     fun rowsFor(id: String): List<SetRow> = when (id) {
         "general" -> listOf(row("lang"), row("carousel"), row("zoom"), row("ambient"))
-        "playback" -> listOf(row("resume"), row("autopick"), row("quality"), row("autonext"), row("intro"), row("jump"))
+        "playback" -> listOf(row("resume"), row("autopick"), row("quality"), row("autonext"), row("intro"), row("jump"), row("p2p"))
         "subs" -> listOf(row("sublang"), row("audiolang"))
         "safety" -> listOf(row("hideadult"), row("pin"))
         "profiles" -> listOf(
@@ -92,6 +92,7 @@ fun SettingsScreen(app: AppState, screen: Screen.SettingsScreen) {
         "quality" -> SetValue(if (st.quality == "auto") t("opt_auto") else st.quality + "p", "action")
         "autonext" -> yesNo(st.autoNext)
         "intro" -> yesNo(st.intro)
+        "p2p" -> yesNo(st.p2p)
         "jump" -> SetValue("${st.jump} s", "action")
         "sublang" -> SetValue(langLabel(st.subLang, "opt_off"), "action")
         "audiolang" -> SetValue(langLabel(st.audioLang, "opt_auto"), "action")
@@ -125,6 +126,7 @@ fun SettingsScreen(app: AppState, screen: Screen.SettingsScreen) {
             "quality" -> set(st.copy(quality = next(st.quality, listOf("auto", "1080", "720", "480"))))
             "autonext" -> set(st.copy(autoNext = !st.autoNext))
             "intro" -> set(st.copy(intro = !st.intro))
+            "p2p" -> set(st.copy(p2p = !st.p2p))
             "jump" -> set(st.copy(jump = next(st.jump.toString(), listOf("10", "15", "30")).toInt()))
             "sublang" -> set(st.copy(subLang = next(st.subLang, listOf("off", "pt", "en", "es"))))
             "audiolang" -> set(st.copy(audioLang = next(st.audioLang, listOf("auto", "pt", "en", "es"))))

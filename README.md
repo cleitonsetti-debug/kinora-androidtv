@@ -52,6 +52,8 @@ Kinora instale apps (fontes desconhecidas).
 - **Ficha do título**: sinopse, elenco, direção, duração, IMDb, classificação indicativa (quando o addon fornece),
   botões Assistir e **Minha lista**, temporadas e episódios com barra de assistido/em andamento.
 - **Fontes** dos addons, ordenadas pela **qualidade preferida**, com um vídeo de teste no fim da lista.
+- **Fontes P2P (infoHash)**: fontes de addons que só trazem `infoHash` (torrent) tocam pelo motor P2P embutido
+  (veja abaixo). Aparecem com a marca **P2P**, depois das fontes diretas.
 - **Player no estilo Netflix/YouTube**: Esquerda/Direita pulam na hora mostrando só a barra vermelha; OK pausa
   mostrando só a barra; Baixo abre os controles completos; **troca automática de fonte** se o vídeo falhar ou demorar
   mais de 30 s; legenda e áudio **lembrados por título**; ficha de abertura; próximo episódio automático.
@@ -60,6 +62,22 @@ Kinora instale apps (fontes desconhecidas).
 - **Ajustes em 7 categorias**: Geral, Reprodução, Legendas e áudio, Segurança e conteúdo (ocultar adulto, **PIN**),
   Perfis, Dados (limpar histórico, lista, pesquisas, assistidos; restaurar addons e ajustes) e Sobre e ajuda
   (atualização, **diagnóstico e autoteste**, atalhos do controle).
+
+## Fontes P2P (infoHash)
+
+Alguns addons devolvem fontes sem endereço HTTP, só com `infoHash` (e às vezes `fileIdx` e trackers em `sources`).
+O Kinora toca essas fontes com um motor P2P embutido ([libtorrent4j](https://github.com/aldenml/libtorrent4j)):
+
+1. busca os metadados pelos trackers do addon e pelo DHT ("Conectando via P2P... N pares");
+2. escolhe o arquivo indicado pelo addon (ou o maior vídeo) e baixa só ele, em ordem;
+3. com o começo e o fim do arquivo baixados, o player abre um endereço local (`127.0.0.1`) e o vídeo continua
+   chegando enquanto você assiste; pular para a frente dá prioridade às partes daquele ponto.
+
+Os dados ficam no cache do app e são **apagados ao fechar o player**. É preciso ter espaço livre do tamanho do
+arquivo. Enquanto assiste, o app também **envia** partes do vídeo para outros pares (é assim que o P2P funciona).
+Dá para desligar em **Ajustes > Reprodução > Fontes P2P (torrent)**; desligado, essas fontes não aparecem.
+O motor precisa de **Android 7 ou mais novo** e deixa o APK maior. Fontes com poucos pares demoram ou falham; nesse
+caso o player tenta a próxima fonte da lista.
 
 ## Adicionar addon por link
 
@@ -91,6 +109,7 @@ A TV pede confirmação antes de adicionar. Com um PIN ativo, a adição por lin
 
 ## Diferenças em relação ao Roku
 
+- Fontes P2P (infoHash) tocam no app (no Roku não são suportadas).
 - O player usa o **Media3 / ExoPlayer**: toca MP4, MKV, HLS (`.m3u8`) e DASH (`.mpd`), com os cabeçalhos HTTP
   do addon (`behaviorHints.proxyHeaders`). Legendas externas em SRT, VTT ou SSA.
 - O `*` do controle Roku virou **Menu** ou **segurar OK** (Addons e Perfis).
@@ -110,10 +129,10 @@ Todo `git push` na branch `main` roda o workflow **Gerar APK**. O APK fica em **
 2. Faça o commit e envie:
    ```
    git push
-   git tag v1.5.3
-   git push origin v1.5.3
+   git tag v1.5.4
+   git push origin v1.5.4
    ```
-3. O Actions cria a Release `v1.5.3` com o `Kinora-AndroidTV.apk` anexado.
+3. O Actions cria a Release `v1.5.4` com o `Kinora-AndroidTV.apk` anexado.
 
 ### No computador
 Com JDK 17 e Android SDK (ou pelo Android Studio):
@@ -131,7 +150,8 @@ Para publicar na Play Store, use uma chave própria e guarde-a fora do repositó
 app/src/main/java/com/kinora/tv/
   MainActivity.kt
   data/   I18n (pt/en/es), AddonStore (protocolo Stremio), Streams (fontes e legendas),
-          Net (e log de erros), Store (persistência por perfil), SelfTest (autoteste), Models, Util
+          Net (e log de erros), Store (persistência por perfil), SelfTest (autoteste), Models, Util,
+          TorrentEngine (motor P2P + servidor HTTP local)
   ui/     App e AppState (pilha de telas), Theme (cores, Poppins, escala), Common (poster, pílulas, chips, foco)
           HomeScreen, SearchScreen, DetailsScreen, PlayerScreen, AddonsScreen, SettingsScreen,
           ProfileScreen, DiagScreen, DialogView (diálogos e PIN), Updater (atualização pelo app)
@@ -142,6 +162,8 @@ tools/                add-addon.sh (adicionar addon pela TV via ADB)
 
 ## Versões
 
+- **1.5.3** – Fontes P2P (infoHash) com motor embutido (libtorrent4j) e servidor local com Range, ajuste para
+  ligar/desligar, estado de conexão e velocidade no player, limpeza automática dos dados.
 - **1.5.2** – Igual ao Kinora Roku 1.5.2: perfis (com infantil e PIN), luz ambiente, zoom e destaques com
   Assistir/Continuar, Minha lista, episódios assistidos, pesquisas recentes, elenco/direção/duração, player no estilo
   Netflix/YouTube com troca automática de fonte e qualidade preferida, legenda/áudio lembrados por título, addons em
@@ -155,7 +177,8 @@ tools/                add-addon.sh (adicionar addon pela TV via ADB)
 ## Avisos
 
 O Kinora não inclui, hospeda nem indexa nenhum vídeo. As fontes vêm de addons que o próprio usuário adiciona,
-e o usuário é responsável por assistir apenas conteúdo que tenha direito de ver. O projeto não recomenda nem
+e o usuário é responsável por assistir (e, no caso das fontes P2P, compartilhar) apenas conteúdo que tenha direito
+de usar. O motor P2P é a libtorrent4j (MIT). O projeto não recomenda nem
 divulga nenhum addon. "Android TV" e "Google TV" são marcas do Google LLC; "Stremio" e "Cinemeta" pertencem aos
 seus donos. O vídeo de teste é *Big Buck Bunny* (c) Blender Foundation, CC BY 3.0.
 

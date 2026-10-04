@@ -308,7 +308,7 @@ class DetailsModel(initial: Info, autoplay: Boolean = false) {
 
         val kind = info.kind
         streamJob = app.scope.launch {
-            val res = Streams.fetch(app.addons, kind, videoId)
+            val res = Streams.fetch(app.addons, kind, videoId, app.settings.p2p)
             val found = ArrayList(Streams.sortByQuality(res.found, app.settings.quality))
             val unsupported = res.unsupported
 
